@@ -81,9 +81,9 @@
   <section>
     <h2>Location and time zone</h2>
     <div class="grid">
-      <div><label for="tz">Time zone</label><input id="tz" placeholder="Europe/Berlin"></div>
-      <div><label for="lat">Latitude</label><input id="lat" inputmode="decimal" placeholder="52.52"></div>
-      <div><label for="lon">Longitude</label><input id="lon" inputmode="decimal" placeholder="13.40"></div>
+      <div><label for="tz">Time zone</label><input id="tz" placeholder="Europe/London"></div>
+      <div><label for="lat">Latitude</label><input id="lat" inputmode="decimal" placeholder="51.51"></div>
+      <div><label for="lon">Longitude</label><input id="lon" inputmode="decimal" placeholder="-0.13"></div>
     </div>
     <p class="hint">Used only for sunrise and sunset; two decimals (about 1 km) are plenty.</p>
   </section>
@@ -169,7 +169,8 @@ async function refresh() {
     setStat("s-light", onOff(s.light), s.light ? "on" : "off");
     setStat("s-wanted", s.wanted === null ? "leave as is" : onOff(s.wanted));
     setStat("s-window", yesNo(s.in_window));
-    setStat("s-air", yesNo(s.air_not_good));
+    setStat("s-air", s.air_not_good === null ? "rule off"
+      : `${yesNo(s.air_not_good)} (${s.config.air_quality.field} = ${s.air_value ?? "no recent reading"})`);
     setStat("s-sun", s.sun ? `${s.sun.sunrise} / ${s.sun.sunset}` : "set location");
     setStat("s-conn", s.connected ? "connected" : "offline", s.connected ? "on" : "err");
     $("s-change").textContent = s.last_change ? `Last change: ${s.last_change}` : "";

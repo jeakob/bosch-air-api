@@ -28,12 +28,13 @@ CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 PORT = int(os.environ.get("PORT", "8080"))
 PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
 TICK_SECONDS = 60
+STALE_SECONDS = 2 * 3600  # older sensor readings count as unknown
 MODES = ("auto", "on", "off", "paused")
 DEFAULT_CONFIG = {
     "mode": "paused",  # auto: follow rules; on/off: force; paused: never touch the ring
-    "timezone": "UTC",
-    "latitude": None,
-    "longitude": None,
+    "timezone": "Europe/London",
+    "latitude": 51.51,  # generic central London; change in the dashboard
+    "longitude": -0.13,
     "windows": [{"start": "18:00", "end": "23:00"}],
     "air_quality": {"enabled": False, "field": "", "good": None},
 }
@@ -234,7 +235,8 @@ class Device:
 
 
 device = Device()
-status = {"error": None, "last_tick": None, "wanted": None, "in_window": None, "air_not_good": None, "last_change": None}
+status = {"error": None, "last_tick": None, "wanted": None, "in_window": None, "air_not_good": None,
+          "air_value": None, "last_change": None}
 pending_login = {}
 
 
@@ -250,9 +252,14 @@ def tick():
     time.sleep(3)  # let the shadow reply land before deciding
     with device.lock:
         reading, current = device.sensor, device.reported.get("lightEnabled")
+    stamp = (reading or {}).get("timestamp")
+    if isinstance(stamp, (int, float)) and now.timestamp() - stamp > STALE_SECONDS:
+        reading = None
     want = wanted_light(cfg, now, reading)
+    rule = cfg["air_quality"]
     status.update(last_tick=now.isoformat(timespec="seconds"), wanted=want, in_window=in_window(cfg, now),
-                  air_not_good=air_not_good(cfg["air_quality"], reading), error=None)
+                  air_not_good=air_not_good(rule, reading) if rule["enabled"] else None,
+                  air_value=(reading or {}).get(rule["field"]) if rule["enabled"] else None, error=None)
     if want is not None and current is not None and current != want:
         device.set_light(want)
         status["last_change"] = f"{now.isoformat(timespec='seconds')} light {'on' if want else 'off'}"
