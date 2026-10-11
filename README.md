@@ -65,7 +65,7 @@ services:
     restart: unless-stopped
     ports: ["8080:8080"]
     environment:
-      DASHBOARD_PASSWORD: change-me   # HTTP basic auth (any username); strongly recommended
+      DASHBOARD_PASSWORD: change-me   # required; HTTP basic auth, any username
     volumes: ["bosch-air-data:/data"]
 volumes:
   bosch-air-data:

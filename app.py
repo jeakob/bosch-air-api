@@ -283,12 +283,12 @@ def today_sun(cfg):
 # -- http ----------------------------------------------------------------------
 
 class Handler(BaseHTTPRequestHandler):
+    timeout = 10  # drop slow or idle clients instead of holding a thread forever
+
     def log_message(self, *args):
         pass
 
     def _authorized(self):
-        if not PASSWORD:
-            return True
         header = self.headers.get("Authorization", "")
         try:
             given = base64.b64decode(header.removeprefix("Basic ")).decode().partition(":")[2]
@@ -335,7 +335,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
             return self._send(415, {"error": "JSON only"})  # also blocks simple cross-site form posts
         try:
-            body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length", 0)), 65536)) or b"{}")
+            length = int(self.headers.get("Content-Length", 0))
+            if not 0 <= length <= 65536:
+                return self._send(413, {"error": "body too large"})
+            body = json.loads(self.rfile.read(length) or b"{}")
             if not isinstance(body, dict):
                 raise ValueError("expected a JSON object")
             if self.path == "/api/config":
@@ -363,7 +366,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    if not PASSWORD:
+        # Without auth, a page the user visits could DNS-rebind to this host and drive the API.
+        raise SystemExit("Set DASHBOARD_PASSWORD (HTTP basic auth) before starting the dashboard.")
     os.makedirs(DATA_DIR, exist_ok=True)
     threading.Thread(target=scheduler, daemon=True).start()
-    log(f"dashboard on :{PORT}" + ("" if PASSWORD else " (no DASHBOARD_PASSWORD set)"))
+    log(f"dashboard on :{PORT}")
     ThreadingHTTPServer(("", PORT), Handler).serve_forever()
