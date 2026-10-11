@@ -35,9 +35,13 @@ def ring_candidates(on, off, on_again):
     return {k: (a.get(k), b.get(k)) for k in sorted(a.keys() | b.keys()) if a.get(k) == c.get(k) != b.get(k)}
 
 
-def jwt_sub(token):
+def jwt_claims(token):
     part = token.split(".")[1]
-    return str(json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))["sub"])
+    return json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+
+
+def jwt_sub(token):
+    return str(jwt_claims(token)["sub"])
 
 
 def connect(token, sub):

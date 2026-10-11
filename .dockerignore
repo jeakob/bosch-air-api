@@ -1,0 +1,7 @@
+.git
+__pycache__
+snapshots.json
+examples
+docs
+*.md
+test_*.py

@@ -14,7 +14,7 @@ from discover import CLIENT_ID, login, request_json
 from snapshot import AGENT, DEVICES, connect, jwt_sub, read_shadow
 
 TOKEN_URL = "https://singlekey-id.com/auth/connect/token"
-TOKEN_FILE = os.path.expanduser("~/.config/bosch-air/token.json")
+TOKEN_FILE = os.environ.get("BOSCH_AIR_TOKEN_FILE") or os.path.expanduser("~/.config/bosch-air/token.json")
 CONFIRM_SECONDS = 30
 
 
@@ -32,7 +32,7 @@ def access_token():
         with open(TOKEN_FILE) as f:
             refresh = json.load(f)["refresh_token"]
     except FileNotFoundError:
-        raise RuntimeError("No saved login; run: python3 bosch_air.py login") from None
+        raise RuntimeError("No saved login; log in via the dashboard or: python3 bosch_air.py login") from None
     response = request_json(TOKEN_URL, data=urlencode(
         {"grant_type": "refresh_token", "client_id": CLIENT_ID, "refresh_token": refresh}
     ).encode())

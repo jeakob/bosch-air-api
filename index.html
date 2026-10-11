@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Air Ring Scheduler</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1c2024; --muted:#5f6b76; --line:#dde1e6; --accent:#1f6feb; --on-accent:#fff; --ok:#1a7f37; --bad:#c62828; color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111418; --card:#1a1f25; --text:#e6e9ed; --muted:#9aa5b1; --line:#2c333b; --accent:#4c8dff; --on-accent:#0b1220; --ok:#3fb950; --bad:#ff6b6b; color-scheme: dark; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui, sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:22px; margin:0 0 16px; }
+  h2 { font-size:15px; margin:0 0 12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+  .stat b { display:block; font-size:18px; }
+  .stat span { color:var(--muted); font-size:13px; }
+  .on { color:var(--ok); } .off { color:var(--muted); } .err { color:var(--bad); }
+  label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px; }
+  input, select, textarea { width:100%; font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:7px 9px; }
+  button { font:inherit; border:1px solid var(--line); background:var(--bg); color:inherit; border-radius:6px; padding:7px 14px; cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
+  button[aria-pressed="true"] { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
+  .row { display:flex; gap:8px; align-items:end; margin-bottom:8px; }
+  .row > div { flex:1; }
+  .modes { display:flex; flex-wrap:wrap; gap:8px; }
+  .hint { color:var(--muted); font-size:13px; margin:6px 0 0; }
+  pre { background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:10px; overflow:auto; font-size:12px; max-height:240px; }
+  .msg { min-height:1.5em; margin-top:8px; }
+  a { color:var(--accent); word-break:break-all; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Air purifier ring light</h1>
+
+  <section>
+    <h2>Now</h2>
+    <div class="grid">
+      <div class="stat"><span>Ring</span><b id="s-light">–</b></div>
+      <div class="stat"><span>Scheduler wants</span><b id="s-wanted">–</b></div>
+      <div class="stat"><span>In a time window</span><b id="s-window">–</b></div>
+      <div class="stat"><span>Air not good</span><b id="s-air">–</b></div>
+      <div class="stat"><span>Sunrise / sunset</span><b id="s-sun">–</b></div>
+      <div class="stat"><span>Connection</span><b id="s-conn">–</b></div>
+    </div>
+    <p class="hint" id="s-change"></p>
+    <p class="hint err" id="s-error"></p>
+  </section>
+
+  <section id="login" hidden>
+    <h2>Bosch login</h2>
+    <p>No saved login yet. Click below, sign in on the page that opens, then open Developer Tools (Console or Network), click <em>Continue</em>, and copy the URL starting with <code>com.bosch.tt.dashtt.pointt://</code> that the browser fails to open.</p>
+    <button class="primary" id="login-start">Start login</button>
+    <p id="login-link"></p>
+    <label for="login-callback">Callback URL (or the whole console message)</label>
+    <textarea id="login-callback" rows="3" autocomplete="off" spellcheck="false"></textarea>
+    <p><button id="login-finish">Finish login</button></p>
+    <div class="msg" id="login-msg"></div>
+  </section>
+
+  <section>
+    <h2>Mode</h2>
+    <div class="modes" id="modes">
+      <button data-mode="auto">Auto (rules)</button>
+      <button data-mode="on">Always on</button>
+      <button data-mode="off">Always off</button>
+      <button data-mode="paused">Paused</button>
+    </div>
+    <p class="hint">Auto turns the ring on while a window is active (and air is not good, if enabled), off otherwise. Paused never touches the ring, so the Bosch app is in charge. Auto, on and off undo changes made in the app within a minute.</p>
+  </section>
+
+  <section>
+    <h2>Time windows (ring on)</h2>
+    <div id="windows"></div>
+    <button id="add-window">Add window</button>
+    <p class="hint">Use <code>HH:MM</code>, <code>sunrise</code>, <code>sunset</code>, or offsets in minutes such as <code>sunset+30</code> or <code>sunrise-15</code>. If the end is before the start, the window runs past midnight.</p>
+  </section>
+
+  <section>
+    <h2>Location and time zone</h2>
+    <div class="grid">
+      <div><label for="tz">Time zone</label><input id="tz" placeholder="Europe/Berlin"></div>
+      <div><label for="lat">Latitude</label><input id="lat" inputmode="decimal" placeholder="52.52"></div>
+      <div><label for="lon">Longitude</label><input id="lon" inputmode="decimal" placeholder="13.40"></div>
+    </div>
+    <p class="hint">Used only for sunrise and sunset; two decimals (about 1 km) are plenty.</p>
+  </section>
+
+  <section>
+    <h2>Air quality</h2>
+    <label><input type="checkbox" id="aq-enabled" style="width:auto"> Only turn the ring on when air quality is not good</label>
+    <div class="grid" style="margin-top:8px">
+      <div><label for="aq-field">Sensor field</label><select id="aq-field"></select></div>
+      <div><label for="aq-good">Good means ≤ number, or equals text</label><input id="aq-good" placeholder="e.g. 12 or good"></div>
+    </div>
+    <p class="hint">The purifier pushes sensor readings on its own schedule (often every 30 minutes). Until one arrives, air counts as not good, so the ring stays on in its windows.</p>
+    <label>Latest sensor reading <span id="sensor-at"></span></label>
+    <pre id="sensor">Waiting for the purifier to publish…</pre>
+    <details><summary class="hint">Sensor metadata (ranges and allowed values)</summary><pre id="meta">–</pre></details>
+  </section>
+
+  <p><button class="primary" id="save">Save settings</button></p>
+  <div class="msg" id="save-msg"></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let config = null, dirty = false;
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+const yesNo = v => v === null || v === undefined ? "–" : v ? "yes" : "no";
+const onOff = v => v === null || v === undefined ? "–" : v ? "on" : "off";
+function setStat(id, text, cls) { const el = $(id); el.textContent = text; el.className = cls || ""; }
+
+function windowRow(w) {
+  const row = document.createElement("div");
+  row.className = "row";
+  row.innerHTML = `<div><label>Start</label><input class="w-start"></div><div><label>End</label><input class="w-end"></div><button type="button" aria-label="Remove window">Remove</button>`;
+  row.querySelector(".w-start").value = w.start;
+  row.querySelector(".w-end").value = w.end;
+  row.querySelector("button").onclick = () => { row.remove(); dirty = true; };
+  $("windows").append(row);
+}
+
+function fillForm(c) {
+  $("windows").replaceChildren();
+  c.windows.forEach(windowRow);
+  $("tz").value = c.timezone;
+  $("lat").value = c.latitude ?? "";
+  $("lon").value = c.longitude ?? "";
+  $("aq-enabled").checked = c.air_quality.enabled;
+  $("aq-good").value = c.air_quality.good ?? "";
+  showMode(c.mode);
+}
+function showMode(mode) {
+  document.querySelectorAll("#modes button").forEach(b => b.setAttribute("aria-pressed", b.dataset.mode === mode));
+}
+function fillFields(sensor, chosen) {
+  const select = $("aq-field");
+  const keys = Object.keys(sensor || {}).filter(k => ["number", "string"].includes(typeof sensor[k]));
+  if (chosen && !keys.includes(chosen)) keys.unshift(chosen);
+  if (select.dataset.keys === keys.join()) return;
+  select.dataset.keys = keys.join();
+  select.replaceChildren(new Option("– choose –", ""), ...keys.map(k => new Option(sensor && k in sensor ? `${k} (now ${sensor[k]})` : k, k)));
+  select.value = chosen || "";
+}
+
+function readForm() {
+  const num = v => v.trim() === "" ? null : Number(v);
+  const good = $("aq-good").value.trim();
+  return {
+    mode: config.mode,
+    timezone: $("tz").value.trim(),
+    latitude: num($("lat").value), longitude: num($("lon").value),
+    windows: [...document.querySelectorAll("#windows .row")].map(r => ({start: r.querySelector(".w-start").value.trim(), end: r.querySelector(".w-end").value.trim()})),
+    air_quality: {enabled: $("aq-enabled").checked, field: $("aq-field").value, good: good === "" ? null : isNaN(Number(good)) ? good : Number(good)},
+  };
+}
+
+async function refresh() {
+  try {
+    const s = await api("/api/status");
+    setStat("s-light", onOff(s.light), s.light ? "on" : "off");
+    setStat("s-wanted", s.wanted === null ? "leave as is" : onOff(s.wanted));
+    setStat("s-window", yesNo(s.in_window));
+    setStat("s-air", yesNo(s.air_not_good));
+    setStat("s-sun", s.sun ? `${s.sun.sunrise} / ${s.sun.sunset}` : "set location");
+    setStat("s-conn", s.connected ? "connected" : "offline", s.connected ? "on" : "err");
+    $("s-change").textContent = s.last_change ? `Last change: ${s.last_change}` : "";
+    $("s-error").textContent = s.error || "";
+    $("login").hidden = s.logged_in;
+    $("sensor").textContent = s.sensor ? JSON.stringify(s.sensor, null, 2) : "Waiting for the purifier to publish…";
+    $("sensor-at").textContent = s.sensor_at ? `(${s.sensor_at})` : "";
+    $("meta").textContent = s.meta ? JSON.stringify(s.meta, null, 2) : "–";
+    if (!config || !dirty) { config = s.config; fillForm(config); }
+    fillFields(s.sensor, dirty ? $("aq-field").value : config.air_quality.field);
+  } catch (e) {
+    $("s-error").textContent = "Dashboard: " + e.message;
+  }
+}
+
+async function save(patch) {
+  const msg = $("save-msg");
+  try {
+    const next = {...readForm(), ...patch};
+    await api("/api/config", next);
+    config = next; dirty = false;
+    msg.textContent = "Saved. Applied within a minute."; msg.className = "msg on";
+    refresh();
+  } catch (e) { msg.textContent = e.message; msg.className = "msg err"; }
+}
+
+document.querySelector("main").addEventListener("input", e => { if (!e.target.closest("#login")) dirty = true; });
+$("add-window").onclick = () => { windowRow({start: "sunset", end: "23:00"}); dirty = true; };
+$("save").onclick = () => save({});
+document.querySelectorAll("#modes button").forEach(b => b.onclick = () => { showMode(b.dataset.mode); save({mode: b.dataset.mode}); });
+
+$("login-start").onclick = async () => {
+  try {
+    const {url} = await api("/api/login/start", {});
+    const a = Object.assign(document.createElement("a"), {href: url, target: "_blank", rel: "noopener", textContent: "Open Bosch sign-in"});
+    $("login-link").replaceChildren(a);
+  } catch (e) { $("login-msg").textContent = e.message; }
+};
+$("login-finish").onclick = async () => {
+  const msg = $("login-msg");
+  try {
+    await api("/api/login/finish", {callback: $("login-callback").value});
+    $("login-callback").value = "";
+    msg.textContent = "Logged in. Connecting…"; msg.className = "msg on";
+    refresh();
+  } catch (e) { msg.textContent = e.message; msg.className = "msg err"; }
+};
+
+refresh();
+setInterval(refresh, 15000);
+</script>
+</body>
+</html>

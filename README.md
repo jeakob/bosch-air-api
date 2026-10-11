@@ -47,6 +47,34 @@ Authorization codes are single-use and expire quickly. If a step fails, run the 
 
 `login` stores only the refresh token, in `~/.config/bosch-air/token.json` (mode 0600, written atomically). Refresh tokens **rotate**: each run uses the stored token and saves the new one. If a run reports `No saved login` or HTTP 400 from the token endpoint, run `login` again.
 
+## Dashboard (Docker)
+
+A small web dashboard and scheduler in one container. It keeps a persistent MQTT session to the purifier and checks every minute whether the ring should be on:
+
+- **Time windows:** the ring is on while any window is active. Start and end can be `HH:MM`, `sunrise`, `sunset`, or an offset such as `sunset+30` or `sunrise-15`. A window whose end is earlier than its start runs past midnight.
+- **Air quality (optional):** also require air quality to be *outside* the good range. The purifier pushes sensor readings on its own schedule (often every 30 minutes); the dashboard lists the fields it publishes, and you choose one plus its "good" limit (a number means good is less than or equal to it; text means good equals it). Until the first reading arrives, air counts as not good, so the ring shows.
+- **Modes:** `auto` (rules), `on`, `off`, and `paused` (never touches the ring). In `auto`, `on` and `off`, a change made in the Bosch app is undone within a minute.
+
+Sunrise and sunset are calculated locally from the latitude and longitude you enter, with no external service (accurate to about 2 minutes; polar day and night have no sunrise, so such windows are skipped).
+
+```yaml
+# compose.yaml
+services:
+  bosch-air:
+    image: <registry>/<owner>/bosch-air-dashboard:latest
+    restart: unless-stopped
+    ports: ["8080:8080"]
+    environment:
+      DASHBOARD_PASSWORD: change-me   # HTTP basic auth (any username); strongly recommended
+    volumes: ["bosch-air-data:/data"]
+volumes:
+  bosch-air-data:
+```
+
+Open `http://<host>:8080`, click **Start login**, finish the Bosch sign-in as described in [Logging in](#logging-in), and paste the callback URL into the dashboard. `/data` holds `token.json` (refresh token, mode 0600) and `config.json`. Keep the dashboard on your LAN: it controls the device, and basic auth over plain HTTP is only as safe as your network.
+
+Build it yourself: `docker build -t bosch-air-dashboard .`
+
 ## How it works
 
 The Air 2000i is commissioned over Matter and lives on Bosch's **"Bacon"** cloud backend, not the classic HomeCom "pointt" gateway API (that API lists 0 gateways for this device).
@@ -77,10 +105,12 @@ The app changes only `lightEnabled` in `desired`, and the device then echoes it 
 
 | File | Purpose |
 | --- | --- |
+| `app.py`, `index.html` | Dashboard and scheduler (windows, sunrise/sunset, air-quality rule) |
+| `Dockerfile` | Container image for the dashboard |
 | `bosch_air.py` | Controller: `login`, `light on/off/status` |
 | `discover.py` | Read-only OAuth login and device discovery (pointt gateways + Bacon devices); prints counts only |
 | `snapshot.py` | Read-only Phase 2 tool: captures shadows and diffs them; writes private `snapshots.json` |
-| `test_discover.py` | Unit tests: `python3 -m unittest test_discover` |
+| `test_*.py` | Unit tests: `python3 -m unittest` |
 | `examples/` | Worked example from a real run: redacted outputs and shadow snapshots |
 | `docs/research-log.md` | Original plan and research notes, including an early draft that should not be run |
 
@@ -93,7 +123,8 @@ Never commit or share: `snapshots.json`, `~/.config/bosch-air/token.json`, redir
 - [x] Login and Bacon device discovery
 - [x] Ring field identified (`lightEnabled`)
 - [ ] First live `light off` / `light on` run against the device
-- [ ] Retries, systemd timer
+- [x] Dashboard with sunrise/sunset, time windows and air-quality rule
+- [ ] Confirm the air-quality sensor field on a live device
 - [ ] Home Assistant switch (e.g. `command_line` switch calling `bosch_air.py`)
 
 ## Credits

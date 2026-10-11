@@ -68,7 +68,8 @@ def read_authorization_code(state):
         print("No Bosch callback on that line; paste the Failed to launch callback URL.")
 
 
-def login():
+def start_login():
+    """Return (authorize URL, state, PKCE verifier) for one login attempt."""
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(
         hashlib.sha256(verifier.encode()).digest()
@@ -85,12 +86,10 @@ def login():
         "style_id": "tt_bsch",
         "state": state,
     }
-    print("Open this URL in the browser where you signed in to SingleKey:\n")
-    print("https://singlekey-id.com/auth/connect/authorize?" + urlencode(params))
-    print("\nBefore clicking Continue, open browser Developer Tools > Network and enable Preserve log.")
-    print("Copy the complete com.bosch.tt.dashtt.pointt:// request URL or Console error after the redirect fails.")
-    print("Leave this program waiting below. If you see a root@...# shell prompt, run it again.")
-    code = read_authorization_code(state)
+    return "https://singlekey-id.com/auth/connect/authorize?" + urlencode(params), state, verifier
+
+
+def exchange_code(code, verifier):
     token_response = request_json(
         "https://singlekey-id.com/auth/connect/token",
         data=urlencode(
@@ -106,6 +105,17 @@ def login():
     token = token_response.get("access_token")
     if not isinstance(token, str) or not token:
         raise ValueError("No access token returned")
+    return token_response
+
+
+def login():
+    url, state, verifier = start_login()
+    print("Open this URL in the browser where you signed in to SingleKey:\n")
+    print(url)
+    print("\nBefore clicking Continue, open browser Developer Tools > Network and enable Preserve log.")
+    print("Copy the complete com.bosch.tt.dashtt.pointt:// request URL or Console error after the redirect fails.")
+    print("Leave this program waiting below. If you see a root@...# shell prompt, run it again.")
+    token_response = exchange_code(read_authorization_code(state), verifier)
     print("Authentication: OK")
     return token_response
 
