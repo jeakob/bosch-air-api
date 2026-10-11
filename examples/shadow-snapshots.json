@@ -1,0 +1,281 @@
+{
+  "Ring ON": {
+    "state": {
+      "desired": {
+        "powerEnabled": true,
+        "opMode": "auto",
+        "childLockEnabled": false,
+        "fanSpeed": 1,
+        "onTimer": 0,
+        "offTimer": 0,
+        "lightEnabled": true,
+        "filterReset": false,
+        "displayEnabled": true
+      },
+      "reported": {
+        "powerEnabled": true,
+        "opMode": "auto",
+        "childLockEnabled": false,
+        "fanSpeed": 1,
+        "onTimer": 0,
+        "offTimer": 0,
+        "lightEnabled": true,
+        "filterReset": false,
+        "displayEnabled": true,
+        "dataLakeBasePublishInterval": 1800
+      }
+    },
+    "metadata": {
+      "desired": {
+        "powerEnabled": {
+          "timestamp": 1699957345
+        },
+        "opMode": {
+          "timestamp": 1699999985
+        },
+        "childLockEnabled": {
+          "timestamp": 1699685682
+        },
+        "fanSpeed": {
+          "timestamp": 1699943333
+        },
+        "onTimer": {
+          "timestamp": 1699685682
+        },
+        "offTimer": {
+          "timestamp": 1699685682
+        },
+        "lightEnabled": {
+          "timestamp": 1699999993
+        },
+        "filterReset": {
+          "timestamp": 1699685682
+        },
+        "displayEnabled": {
+          "timestamp": 1699871103
+        }
+      },
+      "reported": {
+        "powerEnabled": {
+          "timestamp": 1699685682
+        },
+        "opMode": {
+          "timestamp": 1699999987
+        },
+        "childLockEnabled": {
+          "timestamp": 1699685682
+        },
+        "fanSpeed": {
+          "timestamp": 1699943333
+        },
+        "onTimer": {
+          "timestamp": 1699685682
+        },
+        "offTimer": {
+          "timestamp": 1699685682
+        },
+        "lightEnabled": {
+          "timestamp": 1699999994
+        },
+        "filterReset": {
+          "timestamp": 1699685682
+        },
+        "displayEnabled": {
+          "timestamp": 1699871104
+        },
+        "dataLakeBasePublishInterval": {
+          "timestamp": 1699685682
+        }
+      }
+    },
+    "version": 77,
+    "timestamp": 1700000000
+  },
+  "Ring OFF": {
+    "state": {
+      "desired": {
+        "powerEnabled": true,
+        "opMode": "auto",
+        "childLockEnabled": false,
+        "fanSpeed": 1,
+        "onTimer": 0,
+        "offTimer": 0,
+        "lightEnabled": false,
+        "filterReset": false,
+        "displayEnabled": true
+      },
+      "reported": {
+        "powerEnabled": true,
+        "opMode": "auto",
+        "childLockEnabled": false,
+        "fanSpeed": 1,
+        "onTimer": 0,
+        "offTimer": 0,
+        "lightEnabled": true,
+        "filterReset": false,
+        "displayEnabled": true,
+        "dataLakeBasePublishInterval": 1800
+      },
+      "delta": {
+        "lightEnabled": false
+      }
+    },
+    "metadata": {
+      "desired": {
+        "powerEnabled": {
+          "timestamp": 1699957345
+        },
+        "opMode": {
+          "timestamp": 1699999985
+        },
+        "childLockEnabled": {
+          "timestamp": 1699685682
+        },
+        "fanSpeed": {
+          "timestamp": 1699943333
+        },
+        "onTimer": {
+          "timestamp": 1699685682
+        },
+        "offTimer": {
+          "timestamp": 1699685682
+        },
+        "lightEnabled": {
+          "timestamp": 1700000002
+        },
+        "filterReset": {
+          "timestamp": 1699685682
+        },
+        "displayEnabled": {
+          "timestamp": 1699871103
+        }
+      },
+      "reported": {
+        "powerEnabled": {
+          "timestamp": 1699685682
+        },
+        "opMode": {
+          "timestamp": 1699999987
+        },
+        "childLockEnabled": {
+          "timestamp": 1699685682
+        },
+        "fanSpeed": {
+          "timestamp": 1699943333
+        },
+        "onTimer": {
+          "timestamp": 1699685682
+        },
+        "offTimer": {
+          "timestamp": 1699685682
+        },
+        "lightEnabled": {
+          "timestamp": 1699999994
+        },
+        "filterReset": {
+          "timestamp": 1699685682
+        },
+        "displayEnabled": {
+          "timestamp": 1699871104
+        },
+        "dataLakeBasePublishInterval": {
+          "timestamp": 1699685682
+        }
+      }
+    },
+    "version": 78,
+    "timestamp": 1700000004
+  },
+  "Ring ON again": {
+    "state": {
+      "desired": {
+        "powerEnabled": true,
+        "opMode": "auto",
+        "childLockEnabled": false,
+        "fanSpeed": 1,
+        "onTimer": 0,
+        "offTimer": 0,
+        "lightEnabled": true,
+        "filterReset": false,
+        "displayEnabled": true
+      },
+      "reported": {
+        "powerEnabled": true,
+        "opMode": "auto",
+        "childLockEnabled": false,
+        "fanSpeed": 1,
+        "onTimer": 0,
+        "offTimer": 0,
+        "lightEnabled": true,
+        "filterReset": false,
+        "displayEnabled": true,
+        "dataLakeBasePublishInterval": 1800
+      }
+    },
+    "metadata": {
+      "desired": {
+        "powerEnabled": {
+          "timestamp": 1699957345
+        },
+        "opMode": {
+          "timestamp": 1699999985
+        },
+        "childLockEnabled": {
+          "timestamp": 1699685682
+        },
+        "fanSpeed": {
+          "timestamp": 1699943333
+        },
+        "onTimer": {
+          "timestamp": 1699685682
+        },
+        "offTimer": {
+          "timestamp": 1699685682
+        },
+        "lightEnabled": {
+          "timestamp": 1700000006
+        },
+        "filterReset": {
+          "timestamp": 1699685682
+        },
+        "displayEnabled": {
+          "timestamp": 1699871103
+        }
+      },
+      "reported": {
+        "powerEnabled": {
+          "timestamp": 1699685682
+        },
+        "opMode": {
+          "timestamp": 1699999987
+        },
+        "childLockEnabled": {
+          "timestamp": 1699685682
+        },
+        "fanSpeed": {
+          "timestamp": 1699943333
+        },
+        "onTimer": {
+          "timestamp": 1699685682
+        },
+        "offTimer": {
+          "timestamp": 1699685682
+        },
+        "lightEnabled": {
+          "timestamp": 1700000006
+        },
+        "filterReset": {
+          "timestamp": 1699685682
+        },
+        "displayEnabled": {
+          "timestamp": 1699871104
+        },
+        "dataLakeBasePublishInterval": {
+          "timestamp": 1699685682
+        }
+      }
+    },
+    "version": 81,
+    "timestamp": 1700000007
+  }
+}
