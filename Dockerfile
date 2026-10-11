@@ -1,7 +1,7 @@
 FROM python:3.13-alpine
 LABEL org.opencontainers.image.source=https://github.com/jeakob/bosch-air-api \
       org.opencontainers.image.description="Bosch Air 2000i ring-light scheduler dashboard"
-RUN pip install --no-cache-dir "paho-mqtt>=2,<3" tzdata \
+RUN pip install --no-cache-dir "paho-mqtt>=2,<3" \
  && adduser -D -u 1000 app && mkdir /data && chown app:app /data
 WORKDIR /app
 COPY app.py bosch_air.py discover.py snapshot.py index.html ./
