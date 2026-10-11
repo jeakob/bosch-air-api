@@ -1,0 +1,18 @@
+services:
+  bosch-air:
+    image: ghcr.io/jeakob/bosch-air-api:latest
+    container_name: bosch-air
+    restart: unless-stopped
+    env_file: stack.env            # DASHBOARD_PASSWORD (required); see stack.env.example
+    ports:
+      - "8080:8080"                # change the left side to use another port on the Pi
+    volumes:
+      - bosch-air-data:/data       # Bosch login (token.json) and settings (config.json)
+    mem_limit: 64m                 # uses ~15-35 MB
+    cpus: 0.25
+    logging:                       # small logs, kind to SD cards
+      driver: json-file
+      options: { max-size: "1m", max-file: "2" }
+
+volumes:
+  bosch-air-data:

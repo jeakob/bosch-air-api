@@ -57,21 +57,24 @@ A small web dashboard and scheduler in one container. It keeps a persistent MQTT
 
 Sunrise and sunset are calculated locally from the latitude and longitude you enter, with no external service (accurate to about 2 minutes; polar day and night have no sunrise, so such windows are skipped).
 
-```yaml
-# compose.yaml
-services:
-  bosch-air:
-    image: <registry>/<owner>/bosch-air-dashboard:latest
-    restart: unless-stopped
-    ports: ["8080:8080"]
-    environment:
-      DASHBOARD_PASSWORD: change-me   # required; HTTP basic auth, any username
-    volumes: ["bosch-air-data:/data"]
-volumes:
-  bosch-air-data:
-```
+### Run it (Raspberry Pi or any Docker host)
 
-Open `http://<host>:8080`, click **Start login**, finish the Bosch sign-in as described in [Logging in](#logging-in), and paste the callback URL into the dashboard. `/data` holds `token.json` (refresh token, mode 0600) and `config.json`. Keep the dashboard on your LAN: it controls the device, and basic auth over plain HTTP is only as safe as your network.
+The image is published for `linux/arm64` (64-bit Raspberry Pi OS), `linux/arm/v7` (32-bit) and `linux/amd64` as `ghcr.io/jeakob/bosch-air-api:latest`. It is Alpine-based (about 100 MB) and uses roughly 15–35 MB of RAM.
+
+1. Copy [`compose.yaml`](compose.yaml) to the Pi.
+2. Create `stack.env` next to it (see [`stack.env.example`](stack.env.example)):
+   ```
+   DASHBOARD_PASSWORD=some-long-password
+   ```
+   With Portainer, add `DASHBOARD_PASSWORD` under the stack's **Environment variables**; Portainer writes it to `stack.env`.
+3. `docker compose up -d`
+4. Open `http://<pi-address>:8080` and sign in with any username and that password.
+5. Click **Start login** and complete the Bosch sign-in (see [Logging in](#logging-in)). Then set the location, time windows and mode.
+
+The dashboard defaults to a generic central London location and the Europe/London time zone; change both in the dashboard. The container keeps its log timestamps in UTC.
+
+Moving an existing login: copy `token.json` into the volume, then delete the old copy (refresh tokens rotate, so two copies log each other out):
+`docker exec -i -u app bosch-air sh -c 'umask 077; cat > /data/token.json' < token.json`
 
 Build it yourself: `docker build -t bosch-air-dashboard .`
 
@@ -106,7 +109,7 @@ The app changes only `lightEnabled` in `desired`, and the device then echoes it 
 | File | Purpose |
 | --- | --- |
 | `app.py`, `index.html` | Dashboard and scheduler (windows, sunrise/sunset, air-quality rule) |
-| `Dockerfile` | Container image for the dashboard |
+| `Dockerfile`, `compose.yaml`, `stack.env.example` | Container image and deployment |
 | `bosch_air.py` | Controller: `login`, `light on/off/status` |
 | `discover.py` | Read-only OAuth login and device discovery (pointt gateways + Bacon devices); prints counts only |
 | `snapshot.py` | Read-only Phase 2 tool: captures shadows and diffs them; writes private `snapshots.json` |

@@ -6,3 +6,4 @@ docs
 *.md
 test_*.py
 .env
+stack.env
