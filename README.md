@@ -51,8 +51,8 @@ Authorization codes are single-use and expire quickly. If a step fails, run the 
 
 A small web dashboard and scheduler in one container. It keeps a persistent MQTT session to the purifier and checks every minute whether the ring should be on:
 
-- **Time windows:** the ring is on while any window is active. Start and end can be `HH:MM`, `sunrise`, `sunset`, or an offset such as `sunset+30` or `sunrise-15`. A window whose end is earlier than its start runs past midnight.
-- **Air quality (optional):** also require air quality to be *outside* the good range. The purifier pushes sensor readings on its own schedule (often every 30 minutes); the dashboard lists the fields it publishes, and you choose one plus its "good" limit (a number means good is less than or equal to it; text means good equals it). Until the first reading arrives, air counts as not good, so the ring shows.
+- **Time windows:** the ring is on while any window is active, whatever the air quality, unless the window is marked **Only if air not good**; then it also needs air quality outside the good range. Start and end can be `HH:MM`, `sunrise`, `sunset`, or an offset such as `sunset+30` or `sunrise-15`. A window whose end is earlier than its start runs past midnight.
+- **Air quality:** choose a sensor field and its good limit. Optionally, the ring is also on *outside* the windows while air quality is outside the good range. The purifier pushes sensor readings on its own schedule (often every 30 minutes); the dashboard lists the fields it publishes, and you choose one plus its "good" limit (a number means good is less than or equal to it; text means good equals it). Without a reading from the last 2 hours, air counts as good.
 - **Modes:** `auto` (rules), `on`, `off`, and `paused` (never touches the ring). In `auto`, `on` and `off`, a change made in the Bosch app is undone within a minute.
 
 Sunrise and sunset are calculated locally from the latitude and longitude you enter, with no external service (accurate to about 2 minutes; polar day and night have no sunrise, so such windows are skipped).

@@ -43,22 +43,35 @@ class AirTest(unittest.TestCase):
     def test_threshold_text_and_unknown(self):
         self.assertFalse(air_not_good(self.rule, {"pm25": 8}))
         self.assertTrue(air_not_good(self.rule, {"pm25": 30}))
-        self.assertTrue(air_not_good(self.rule, None))
+        self.assertFalse(air_not_good(self.rule, None))  # no reading: don't turn the ring on
         self.assertFalse(air_not_good({"enabled": True, "field": "aq", "good": "Good"}, {"aq": "good"}))
 
-    def test_auto_needs_window_and_bad_air(self):
-        cfg = {**LONDON, "windows": [{"start": "00:00", "end": "23:59"}], "air_quality": self.rule}
+    def test_window_overrides_air_quality(self):
+        cfg = {**LONDON, "windows": [{"start": "11:00", "end": "13:00", "air_only": False}],
+               "air_quality": self.rule}
+        noon, evening = utc(2024, 7, 1, 11, 0), utc(2024, 7, 1, 17, 0)  # 12:00 and 18:00 London
+        self.assertTrue(wanted_light(cfg, noon, {"pm25": 5}))       # in window, good air
+        self.assertFalse(wanted_light(cfg, evening, {"pm25": 5}))   # outside, good air
+        self.assertTrue(wanted_light(cfg, evening, {"pm25": 50}))   # outside, bad air
+        self.assertFalse(wanted_light(cfg, evening, None))          # outside, no reading
+        self.assertFalse(wanted_light({**cfg, "air_quality": {**self.rule, "enabled": False}}, evening, {"pm25": 50}))
+        self.assertIsNone(wanted_light({**cfg, "mode": "paused"}, noon, None))
+
+    def test_window_only_if_air_not_good(self):
+        cfg = {**LONDON, "windows": [{"start": "11:00", "end": "13:00", "air_only": True}],
+               "air_quality": {**self.rule, "enabled": False}}
         noon = utc(2024, 7, 1, 11, 0)
         self.assertFalse(wanted_light(cfg, noon, {"pm25": 5}))
         self.assertTrue(wanted_light(cfg, noon, {"pm25": 50}))
-        self.assertIsNone(wanted_light({**cfg, "mode": "paused"}, noon, None))
+        self.assertFalse(wanted_light(cfg, noon, None))
 
 
 class ValidateTest(unittest.TestCase):
     def test_rejects_bad_input(self):
         for bad in ({**LONDON, "mode": "x"}, {**LONDON, "timezone": "Mars/Base"},
                     {**LONDON, "windows": [{"start": "25:00", "end": "01:00"}]},
-                    {**LONDON, "latitude": None, "windows": [{"start": "sunset", "end": "23:00"}]}):
+                    {**LONDON, "latitude": None, "windows": [{"start": "sunset", "end": "23:00"}]},
+                    {**LONDON, "windows": [{"start": "10:00", "end": "11:00", "air_only": True}]}):
             with self.assertRaises(ValueError):
                 validate(bad)
         self.assertEqual(validate(LONDON)["timezone"], "Europe/London")

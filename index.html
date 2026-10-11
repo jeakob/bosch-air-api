@@ -22,7 +22,9 @@
   button { font:inherit; border:1px solid var(--line); background:var(--bg); color:inherit; border-radius:6px; padding:7px 14px; cursor:pointer; }
   button.primary { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
   button[aria-pressed="true"] { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
-  .row { display:flex; gap:8px; align-items:end; margin-bottom:8px; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:end; margin-bottom:12px; }
+  .w-only-label { flex-basis:100%; display:flex; gap:6px; align-items:center; margin:0; }
+  .w-only-label input { width:auto; }
   .row > div { flex:1; }
   .modes { display:flex; flex-wrap:wrap; gap:8px; }
   .hint { color:var(--muted); font-size:13px; margin:6px 0 0; }
@@ -68,14 +70,14 @@
       <button data-mode="off">Always off</button>
       <button data-mode="paused">Paused</button>
     </div>
-    <p class="hint">Auto turns the ring on while a window is active (and air is not good, if enabled), off otherwise. Paused never touches the ring, so the Bosch app is in charge. Auto, on and off undo changes made in the app within a minute.</p>
+    <p class="hint">Auto turns the ring on while a window is active (windows marked "only if air not good" also need bad air), and outside the windows while air is not good if that option is on; off otherwise. Paused never touches the ring, so the Bosch app is in charge. Auto, on and off undo changes made in the app within a minute.</p>
   </section>
 
   <section>
     <h2>Time windows (ring on)</h2>
     <div id="windows"></div>
     <button id="add-window">Add window</button>
-    <p class="hint">Use <code>HH:MM</code>, <code>sunrise</code>, <code>sunset</code>, or offsets in minutes such as <code>sunset+30</code> or <code>sunrise-15</code>. If the end is before the start, the window runs past midnight.</p>
+    <p class="hint">Use <code>HH:MM</code>, <code>sunrise</code>, <code>sunset</code>, or offsets in minutes such as <code>sunset+30</code> or <code>sunrise-15</code>. If the end is before the start, the window runs past midnight. A window turns the ring on whatever the air quality, unless <em>Only if air not good</em> is ticked.</p>
   </section>
 
   <section>
@@ -90,12 +92,12 @@
 
   <section>
     <h2>Air quality</h2>
-    <label><input type="checkbox" id="aq-enabled" style="width:auto"> Only turn the ring on when air quality is not good</label>
+    <label><input type="checkbox" id="aq-enabled" style="width:auto"> Also turn the ring on outside the time windows when air quality is not good</label>
     <div class="grid" style="margin-top:8px">
       <div><label for="aq-field">Sensor field</label><select id="aq-field"></select></div>
       <div><label for="aq-good">Good means ≤ number, or equals text</label><input id="aq-good" placeholder="e.g. 12 or good"></div>
     </div>
-    <p class="hint">The purifier pushes sensor readings on its own schedule (often every 30 minutes). Until one arrives, air counts as not good, so the ring stays on in its windows.</p>
+    <p class="hint">The purifier pushes sensor readings on its own schedule (often every 30 minutes). Without a reading from the last 2 hours, air counts as good.</p>
     <label>Latest sensor reading <span id="sensor-at"></span></label>
     <pre id="sensor">Waiting for the purifier to publish…</pre>
     <details><summary class="hint">Sensor metadata (ranges and allowed values)</summary><pre id="meta">–</pre></details>
@@ -121,9 +123,11 @@ function setStat(id, text, cls) { const el = $(id); el.textContent = text; el.cl
 function windowRow(w) {
   const row = document.createElement("div");
   row.className = "row";
-  row.innerHTML = `<div><label>Start</label><input class="w-start"></div><div><label>End</label><input class="w-end"></div><button type="button" aria-label="Remove window">Remove</button>`;
+  row.innerHTML = `<div><label>Start</label><input class="w-start"></div><div><label>End</label><input class="w-end"></div><button type="button" aria-label="Remove window">Remove</button>
+    <label class="w-only-label"><input type="checkbox" class="w-only"> Only if air not good</label>`;
   row.querySelector(".w-start").value = w.start;
   row.querySelector(".w-end").value = w.end;
+  row.querySelector(".w-only").checked = !!w.air_only;
   row.querySelector("button").onclick = () => { row.remove(); dirty = true; };
   $("windows").append(row);
 }
@@ -158,7 +162,7 @@ function readForm() {
     mode: config.mode,
     timezone: $("tz").value.trim(),
     latitude: num($("lat").value), longitude: num($("lon").value),
-    windows: [...document.querySelectorAll("#windows .row")].map(r => ({start: r.querySelector(".w-start").value.trim(), end: r.querySelector(".w-end").value.trim()})),
+    windows: [...document.querySelectorAll("#windows .row")].map(r => ({start: r.querySelector(".w-start").value.trim(), end: r.querySelector(".w-end").value.trim(), air_only: r.querySelector(".w-only").checked})),
     air_quality: {enabled: $("aq-enabled").checked, field: $("aq-field").value, good: good === "" ? null : isNaN(Number(good)) ? good : Number(good)},
   };
 }
@@ -198,7 +202,7 @@ async function save(patch) {
 }
 
 document.querySelector("main").addEventListener("input", e => { if (!e.target.closest("#login")) dirty = true; });
-$("add-window").onclick = () => { windowRow({start: "sunset", end: "23:00"}); dirty = true; };
+$("add-window").onclick = () => { windowRow({start: "sunset", end: "23:00", air_only: false}); dirty = true; };
 $("save").onclick = () => save({});
 document.querySelectorAll("#modes button").forEach(b => b.onclick = () => { showMode(b.dataset.mode); save({mode: b.dataset.mode}); });
 

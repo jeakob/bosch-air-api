@@ -1,7 +1,7 @@
 """Dashboard and scheduler for the Bosch Air 2000i ring light.
 
-The ring should be on while any time window is active, and (optionally) only
-while air quality is outside the "good" range. Runs one persistent MQTT session
+The ring is on while any time window is active, and outside the windows
+(optionally) while air quality is outside the "good" range. Runs one persistent MQTT session
 so pushed sensor readings are captured; re-evaluates every TICK_SECONDS.
 """
 
@@ -35,7 +35,7 @@ DEFAULT_CONFIG = {
     "timezone": "Europe/London",
     "latitude": 51.51,  # generic central London; change in the dashboard
     "longitude": -0.13,
-    "windows": [{"start": "18:00", "end": "23:00"}],
+    "windows": [{"start": "18:00", "end": "23:00", "air_only": False}],
     "air_quality": {"enabled": False, "field": "", "good": None},
 }
 ENDPOINT = re.compile(r"^(?:([01]\d|2[0-3]):([0-5]\d)|(sunrise|sunset)([+-]\d{1,3})?)$")
@@ -75,9 +75,10 @@ def resolve(spec, day, cfg):
     return (moment + timedelta(minutes=int(m.group(4) or 0))).astimezone(tz)
 
 
-def in_window(cfg, now):
-    """True if now falls in any window; a window whose end is before its start runs past midnight."""
+def active_windows(cfg, now):
+    """Windows containing now; a window whose end is before its start runs past midnight."""
     today = now.astimezone(ZoneInfo(cfg["timezone"])).date()
+    active = []
     for window in cfg["windows"]:
         for day in (today - timedelta(days=1), today):
             start, end = resolve(window["start"], day, cfg), resolve(window["end"], day, cfg)
@@ -88,18 +89,21 @@ def in_window(cfg, now):
                 if end is None:
                     continue
             if start <= now < end:
-                return True
-    return False
+                active.append(window)
+                break
+    return active
+
+
+def in_window(cfg, now):
+    return bool(active_windows(cfg, now))
 
 
 def air_not_good(rule, reading):
-    """True when the reading is outside the good range. Unknown counts as not good, so the ring shows."""
-    if not rule["enabled"]:
-        return True
+    """True only for a reading outside the good range. No field chosen, or no recent reading, counts as good."""
     value = (reading or {}).get(rule["field"])
     good = rule["good"]
     if value is None or good is None:
-        return True
+        return False
     if isinstance(value, (int, float)) and isinstance(good, (int, float)):
         return value > good
     return str(value).lower() != str(good).lower()
@@ -111,7 +115,11 @@ def wanted_light(cfg, now, reading):
         return None
     if cfg["mode"] in ("on", "off"):
         return cfg["mode"] == "on"
-    return in_window(cfg, now) and air_not_good(cfg["air_quality"], reading)
+    bad = air_not_good(cfg["air_quality"], reading)
+    # A window turns the ring on whatever the air, unless it is marked "only if air not good".
+    if any(bad or not w["air_only"] for w in active_windows(cfg, now)):
+        return True
+    return cfg["air_quality"]["enabled"] and bad  # optional: also on outside windows when air is not good
 
 
 # -- config --------------------------------------------------------------------
@@ -138,17 +146,19 @@ def validate(cfg):
                 raise ValueError(f"window {key} {spec!r}: use HH:MM, sunrise, sunset, sunset+30, sunrise-15")
             if spec.startswith("sun") and (lat is None or lon is None):
                 raise ValueError("sunrise/sunset windows need latitude and longitude")
+        if not isinstance(w.get("air_only", False), bool):
+            raise ValueError("window air_only must be true or false")
     aq = cfg.get("air_quality")
     if not isinstance(aq, dict) or not isinstance(aq.get("enabled"), bool) or not isinstance(aq.get("field"), str):
         raise ValueError("air_quality needs enabled (bool) and field (text)")
-    if aq["enabled"] and not aq["field"]:
-        raise ValueError("choose the air-quality field")
+    if (aq["enabled"] or any(w.get("air_only") for w in windows)) and not (aq["field"] and aq.get("good") is not None):
+        raise ValueError("choose the air-quality field and its good limit")
     good = aq.get("good")
     if good is not None and (isinstance(good, bool) or not isinstance(good, (int, float, str))):
         raise ValueError("air_quality good must be a number or text")
     return {
         "mode": cfg["mode"], "timezone": str(cfg["timezone"]), "latitude": lat, "longitude": lon,
-        "windows": [{"start": w["start"], "end": w["end"]} for w in windows],
+        "windows": [{"start": w["start"], "end": w["end"], "air_only": w.get("air_only", False)} for w in windows],
         "air_quality": {"enabled": aq["enabled"], "field": aq["field"][:64], "good": good},
     }
 
@@ -258,8 +268,8 @@ def tick():
     want = wanted_light(cfg, now, reading)
     rule = cfg["air_quality"]
     status.update(last_tick=now.isoformat(timespec="seconds"), wanted=want, in_window=in_window(cfg, now),
-                  air_not_good=air_not_good(rule, reading) if rule["enabled"] else None,
-                  air_value=(reading or {}).get(rule["field"]) if rule["enabled"] else None, error=None)
+                  air_not_good=air_not_good(rule, reading) if rule["field"] else None,
+                  air_value=(reading or {}).get(rule["field"]) if rule["field"] else None, error=None)
     if want is not None and current is not None and current != want:
         device.set_light(want)
         status["last_change"] = f"{now.isoformat(timespec='seconds')} light {'on' if want else 'off'}"
