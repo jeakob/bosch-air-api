@@ -1,0 +1,6 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions  # bumps the pinned action SHAs
+    directory: /
+    schedule:
+      interval: monthly
