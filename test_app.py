@@ -1,7 +1,7 @@
 import unittest
 from datetime import date, datetime, timezone
 
-from app import air_not_good, in_window, merge_history, retry_delay, sun_times, validate, wanted_light
+from app import air_not_good, filter_estimate, in_window, merge_history, retry_delay, sun_times, validate, wanted_light
 
 LONDON = {"mode": "auto", "timezone": "Europe/London", "latitude": 51.5, "longitude": -0.13,
           "windows": [], "air_quality": {"enabled": False, "field": "", "good": None}}
@@ -76,6 +76,18 @@ class HistoryTest(unittest.TestCase):
         self.assertEqual([r["pm2.5"] for r in history], [5, 290])
         again = merge_history(history, [{"timestamp": now, "pm2.5": 291}], now, keep)
         self.assertEqual([r["pm2.5"] for r in again], [5, 291])
+
+
+class FilterTest(unittest.TestCase):
+    def test_projects_linear_wear_and_restarts_after_a_new_filter(self):
+        day = 86400
+        wear = [{"timestamp": d * day, "filterCapacity": 100 - d} for d in range(11)]  # 1 % a day, 90 % left
+        est = filter_estimate(wear)
+        self.assertEqual(est["per_day"], 1.0)
+        self.assertEqual(est["replace_at"], 100 * day)
+        self.assertIsNone(filter_estimate(wear[:2]))  # too little to go on
+        fresh = wear + [{"timestamp": 11 * day, "filterCapacity": 100}]
+        self.assertIsNone(filter_estimate(fresh))  # new filter: old wear is ignored
 
 
 class RetryTest(unittest.TestCase):

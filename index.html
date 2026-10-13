@@ -75,6 +75,7 @@
       <div class="stat"><span>Sunrise / sunset</span><b id="s-sun">–</b></div>
       <div class="stat"><span>Connection</span><b id="s-conn">–</b></div>
       <div class="stat"><span>Filter left</span><b id="s-filter">–</b></div>
+      <div class="stat"><span>Replace filter</span><b id="s-replace">–</b></div>
     </div>
     <p class="hint" id="s-change"></p>
     <p class="hint err" id="s-error"></p>
@@ -234,6 +235,11 @@ async function refresh() {
     setStat("s-conn", s.connected ? "connected" : "offline", s.connected ? "on" : "err");
     const filter = s.sensor?.filterCapacity;
     setStat("s-filter", typeof filter === "number" ? `${filter} %` : "–", typeof filter === "number" && filter <= 10 ? "err" : "");
+    const est = s.filter;
+    setStat("s-replace", est ? "≈ " + fmt(est.replace_at, {day: "numeric", month: "short", year: "numeric"}) : "estimating…",
+      est ? (est.replace_at - Date.now() / 1000 < 14 * 86400 ? "err" : "") : "off");
+    $("s-replace").title = est ? `Falling ${est.per_day} % a day over the last ${est.based_on_days} days of history`
+      : "Needs a drop of 2 % over at least 2 days in the stored history";
     $("s-change").textContent = s.last_change ? `Last change: ${s.last_change}` : "";
     $("s-error").textContent = s.error || "";
     $("login").hidden = s.logged_in;

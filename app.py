@@ -195,6 +195,26 @@ def merge_history(history, items, now, keep_seconds):
     return [by_ts[t] for t in sorted(by_ts) if now - t <= keep_seconds]
 
 
+def filter_estimate(history):
+    """Project when filterCapacity reaches 0 % from a least-squares line over readings since the last
+    filter change. None until it has dropped at least 2 % over at least 2 days (it reports whole %)."""
+    pts = [(r["timestamp"], r["filterCapacity"]) for r in history if isinstance(r.get("filterCapacity"), (int, float))]
+    for i in range(len(pts) - 1, 0, -1):
+        if pts[i][1] > pts[i - 1][1]:  # went up: new filter, or reset
+            pts = pts[i:]
+            break
+    if len(pts) < 2 or pts[-1][0] - pts[0][0] < 2 * 86400 or pts[0][1] - pts[-1][1] < 2:
+        return None
+    n = len(pts)
+    mt, mv = sum(t for t, _ in pts) / n, sum(v for _, v in pts) / n
+    slope = sum((t - mt) * (v - mv) for t, v in pts) / sum((t - mt) ** 2 for t, _ in pts)  # % per second
+    if slope >= 0:
+        return None
+    now_t, now_v = pts[-1]
+    return {"replace_at": int(now_t + now_v / -slope), "per_day": round(-slope * 86400, 2),
+            "based_on_days": round((now_t - pts[0][0]) / 86400, 1)}
+
+
 def load_history():
     try:
         with open(HISTORY_FILE) as f:
@@ -405,7 +425,8 @@ class Handler(BaseHTTPRequestHandler):
             with device.lock:
                 live = {"connected": bool(device.client and device.client.is_connected()),
                         "light": device.reported.get("lightEnabled"),
-                        "sensor": device.sensor, "sensor_at": device.sensor_at, "meta": device.meta}
+                        "sensor": device.sensor, "sensor_at": device.sensor_at, "meta": device.meta,
+                        "filter": filter_estimate(device.history)}
             self._send(200, {"config": cfg, "logged_in": os.path.exists(os.environ["BOSCH_AIR_TOKEN_FILE"]),
                              "sun": today_sun(cfg), **live, **status})
         elif self.path == "/api/history":
