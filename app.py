@@ -29,6 +29,7 @@ HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
 PORT = int(os.environ.get("PORT", "8080"))
 PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
 TICK_SECONDS = 60
+MAX_RETRY_SECONDS = 30 * 60
 STALE_SECONDS = 2 * 3600  # older sensor readings count as unknown
 MODES = ("auto", "on", "off", "paused")
 DEFAULT_CONFIG = {
@@ -328,17 +329,29 @@ def tick():
         log(status["last_change"])
 
 
+def retry_delay(failures):
+    """Seconds to wait after this many failures in a row: 1, 2, 4 ... 30 minutes, so a lasting fault
+    doesn't log in to Bosch every minute."""
+    return min(TICK_SECONDS * 2 ** (failures - 1), MAX_RETRY_SECONDS)
+
+
 def scheduler():
+    failures = 0
     while True:
+        delay = TICK_SECONDS
         try:
             tick()
+            if failures:
+                log(f"recovered after {failures} failed attempt{'s' * (failures > 1)}")
+            failures = 0
         except Exception as exc:
+            failures += 1
+            delay = retry_delay(failures)
             message = f"{type(exc).__name__}: {str(exc)[:150]}"
-            if message != status["error"]:
-                log("error " + message)
-            status["error"] = message
+            log(f"error {message}; retry {failures} in {delay // 60} min")
+            status["error"] = f"{message} (retrying in {delay // 60} min)"
             device.close()
-        time.sleep(TICK_SECONDS)
+        time.sleep(delay)
 
 
 def today_sun(cfg):

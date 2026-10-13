@@ -1,7 +1,7 @@
 import unittest
 from datetime import date, datetime, timezone
 
-from app import air_not_good, in_window, merge_history, sun_times, validate, wanted_light
+from app import air_not_good, in_window, merge_history, retry_delay, sun_times, validate, wanted_light
 
 LONDON = {"mode": "auto", "timezone": "Europe/London", "latitude": 51.5, "longitude": -0.13,
           "windows": [], "air_quality": {"enabled": False, "field": "", "good": None}}
@@ -76,6 +76,11 @@ class HistoryTest(unittest.TestCase):
         self.assertEqual([r["pm2.5"] for r in history], [5, 290])
         again = merge_history(history, [{"timestamp": now, "pm2.5": 291}], now, keep)
         self.assertEqual([r["pm2.5"] for r in again], [5, 291])
+
+
+class RetryTest(unittest.TestCase):
+    def test_backoff_doubles_to_thirty_minutes(self):
+        self.assertEqual([retry_delay(n) // 60 for n in range(1, 8)], [1, 2, 4, 8, 16, 30, 30])
 
 
 class ValidateTest(unittest.TestCase):
