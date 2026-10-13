@@ -4,9 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Air Purifier Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M5 13q-4 6 0 12M59 13q4 6 0 12' fill='none' stroke='%234c8dff' stroke-width='4' stroke-linecap='round'/%3E%3Crect x='11' y='2' width='42' height='60' rx='11' fill='%23e8ecf1' stroke='%232c333b' stroke-width='4'/%3E%3Ccircle cx='32' cy='20' r='10' fill='none' stroke='%231f6feb' stroke-width='6'/%3E%3Cpath d='M21 41h22M21 50h22' stroke='%235f6b76' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
 <style>
-  :root { --bg:#f6f7f9; --card:#fff; --text:#1c2024; --muted:#5f6b76; --line:#dde1e6; --accent:#1f6feb; --on-accent:#fff; --ok:#1a7f37; --bad:#c62828; color-scheme: light; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#111418; --card:#1a1f25; --text:#e6e9ed; --muted:#9aa5b1; --line:#2c333b; --accent:#4c8dff; --on-accent:#0b1220; --ok:#3fb950; --bad:#ff6b6b; color-scheme: dark; } }
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1c2024; --muted:#5f6b76; --line:#dde1e6; --accent:#1f6feb; --on-accent:#fff; --ok:#1a7f37; --bad:#c62828; --lvl0:#1a9e5f; --lvl1:#7c4dda; --lvl2:#e8710a; --lvl3:#b3261e; color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111418; --card:#1a1f25; --text:#e6e9ed; --muted:#9aa5b1; --line:#2c333b; --accent:#4c8dff; --on-accent:#0b1220; --ok:#3fb950; --bad:#ff6b6b; --lvl0:#24a35d; --lvl1:#9068e8; --lvl2:#c98418; --lvl3:#be3434; color-scheme: dark; } }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui, sans-serif; }
   main { max-width:1280px; margin:0 auto; padding:24px 16px 48px; }
@@ -54,6 +55,8 @@
   #chart text { font-size:11px; fill:var(--muted); font-variant-numeric:tabular-nums; }
   .chart-tip { position:absolute; top:0; pointer-events:none; background:var(--card); border:1px solid var(--line); border-radius:6px; padding:4px 8px; font-size:12px; white-space:nowrap; box-shadow:0 2px 8px rgb(0 0 0 / .12); }
   .chart-tip b { display:block; font-size:14px; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; }
+  .legend { display:flex; flex-wrap:wrap; gap:4px 16px; margin:8px 0 4px; font-size:12px; color:var(--muted); }
   .chart-empty { color:var(--muted); font-size:13px; padding:40px 0; text-align:center; }
   table { width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
   td, th { text-align:left; padding:3px 6px; border-bottom:1px solid var(--line); }
@@ -95,6 +98,7 @@
       </div>
     </div>
     <div id="chart"></div>
+    <div class="legend" id="c-legend"></div>
     <details><summary class="hint">Show as table</summary><div class="table-wrap"><table><thead><tr><th>Time</th><th id="t-field">Value</th></tr></thead><tbody id="c-table"></tbody></table></div></details>
   </section>
 
@@ -231,6 +235,8 @@ async function refresh() {
     setStat("s-window", yesNo(s.in_window));
     setStat("s-air", s.air_not_good === null ? "rule off"
       : `${yesNo(s.air_not_good)} (${s.config.air_quality.field} = ${s.air_value ?? "no recent reading"})`);
+    const pm = s.sensor?.["pm2.5"], ringLv = levelOf("pm2.5", pm);
+    if (s.light && ringLv !== null) { $("s-light").prepend(dotEl(ringLv)); $("s-light").title = `Ring shows ${LEVELS[ringLv].toLowerCase()} (PM2.5 ${pm})`; }
     setStat("s-sun", s.sun ? `${s.sun.sunrise} / ${s.sun.sunset}` : "set location");
     setStat("s-conn", s.connected ? "connected" : "offline", s.connected ? "on" : "err");
     const filter = s.sensor?.filterCapacity;
@@ -314,6 +320,19 @@ async function loadHistory() {
   drawChart();
 }
 
+// The purifier ring's colours: PM2.5 above 12 purple, above 35 orange, above 55 red; airQuality 1-4 is the same scale.
+const LEVELS = ["Good", "Fair", "Poor", "Very poor"];
+const PM_LIMITS = [12, 35, 55];
+function levelOf(field, v) {
+  if (typeof v !== "number") return null;
+  if (field === "pm2.5" || field === "pm2_5") return PM_LIMITS.filter(l => v > l).length;
+  if (field === "airQuality") return Math.min(Math.max(Math.round(v) - 1, 0), 3);
+  return null;
+}
+const levelLimits = field => field === "airQuality" ? [1.5, 2.5, 3.5] : field === "pm2.5" || field === "pm2_5" ? PM_LIMITS : null;
+const lvlColor = i => `var(--lvl${i})`;
+function dotEl(i) { return Object.assign(document.createElement("i"), {className: "dot", style: `background:${lvlColor(i)}`}); }
+
 function numericFields() {
   const keys = new Set();
   readings.forEach(r => Object.keys(r).forEach(k => k !== "timestamp" && typeof r[k] === "number" && keys.add(k)));
@@ -341,14 +360,26 @@ function drawChart() {
 
   $("c-label").textContent = chartField ? `${chartField}${unit ? " (" + unit + ")" : ""} · latest` : "Air quality";
   $("c-value").textContent = latest ? latest[1].toLocaleString() : "–";
-  $("c-state").textContent = !latest ? "" : `${good === null ? "" : latest[1] > good ? "▲ not good · " : "✓ good · "}${fmtTime(latest[0])}`;
-  $("c-state").className = !latest || good === null ? "" : latest[1] > good ? "err" : "on";
+  const limits = levelLimits(chartField), lv = v => limits ? levelOf(chartField, v) : null;
+  const latestLv = latest ? lv(latest[1]) : null;
+  if (!latest) $("c-state").replaceChildren();
+  else if (latestLv !== null) $("c-state").replaceChildren(dotEl(latestLv), `${LEVELS[latestLv]} · ${fmtTime(latest[0])}`);
+  else $("c-state").replaceChildren(`${good === null ? "" : latest[1] > good ? "▲ not good · " : "✓ good · "}${fmtTime(latest[0])}`);
+  $("c-state").className = !latest || good === null || latestLv !== null ? "" : latest[1] > good ? "err" : "on";
   $("t-field").textContent = chartField || "Value";
   $("c-table").replaceChildren(...pts.slice().reverse().map(([t, v]) => {
-    const tr = document.createElement("tr");
-    for (const text of [fmtTime(t), v]) tr.append(Object.assign(document.createElement("td"), {textContent: text}));
+    const tr = document.createElement("tr"), l = lv(v), cell = document.createElement("td");
+    tr.append(Object.assign(document.createElement("td"), {textContent: fmtTime(t)}));
+    cell.append(...(l === null ? [String(v)] : [dotEl(l), `${v} · ${LEVELS[l]}`]));
+    tr.append(cell);
     return tr;
   }));
+  $("c-legend").replaceChildren(...(limits ? LEVELS.map((name, i) => {
+    const span = document.createElement("span"), unitText = chartField === "airQuality" ? `${i + 1}` :
+      i === 0 ? `≤ ${PM_LIMITS[0]}` : i === 3 ? `> ${PM_LIMITS[2]}` : `${PM_LIMITS[i - 1] + 1}–${PM_LIMITS[i]}`;
+    span.append(dotEl(i), `${name} ${unitText}`);
+    return span;
+  }) : []));
 
   if (!pts.length) {
     box.replaceChildren(Object.assign(document.createElement("div"), {className: "chart-empty",
@@ -380,16 +411,26 @@ function drawChart() {
       span <= 86400 ? fmt(t, {hour: "2-digit", minute: "2-digit"}) : span <= 14 * 86400 ? fmt(t, {weekday: "short", day: "numeric"}) : fmt(t, {day: "numeric", month: "short"});
   }
 
-  // line + wash, broken where readings are more than 2 hours apart
+  // line + wash coloured by level (hard stops at the ring's limits), broken where readings are more than 2 hours apart
+  let paint = "var(--accent)";
+  if (limits) {
+    const grad = svgEl("linearGradient", {id: "lvl-grad", gradientUnits: "userSpaceOnUse", x1: 0, x2: 0, y1: y(0), y2: y(yMax)}, svgEl("defs", {}, svg));
+    [0, ...limits].forEach((from_, i) => {
+      const a = Math.min(from_ / yMax, 1), b = Math.min((limits[i] ?? Infinity) / yMax, 1);
+      svgEl("stop", {offset: a, "stop-color": lvlColor(i)}, grad);
+      svgEl("stop", {offset: b, "stop-color": lvlColor(i)}, grad);
+    });
+    paint = "url(#lvl-grad)";
+  }
   const segs = [[]];
   pts.forEach((p, i) => { if (i && p[0] - pts[i - 1][0] > 7200) segs.push([]); segs[segs.length - 1].push(p); });
   for (const seg of segs) {
     const d = seg.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join("");
-    if (seg.length > 1) svgEl("path", {d: `${d}L${x(seg[seg.length - 1][0]).toFixed(1)},${y(0)}L${x(seg[0][0]).toFixed(1)},${y(0)}Z`, fill: "var(--accent)", "fill-opacity": .1}, svg);
-    svgEl("path", {d, fill: "none", stroke: "var(--accent)", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round"}, svg);
-    if (seg.length === 1) svgEl("circle", {cx: x(seg[0][0]), cy: y(seg[0][1]), r: 2.5, fill: "var(--accent)"}, svg);
+    if (seg.length > 1) svgEl("path", {d: `${d}L${x(seg[seg.length - 1][0]).toFixed(1)},${y(0)}L${x(seg[0][0]).toFixed(1)},${y(0)}Z`, fill: paint, "fill-opacity": .12}, svg);
+    svgEl("path", {d, fill: "none", stroke: paint, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round"}, svg);
+    if (seg.length === 1) svgEl("circle", {cx: x(seg[0][0]), cy: y(seg[0][1]), r: 2.5, fill: paint}, svg);
   }
-  svgEl("circle", {cx: x(latest[0]), cy: y(latest[1]), r: 4, fill: "var(--accent)", stroke: "var(--card)", "stroke-width": 2}, svg);
+  svgEl("circle", {cx: x(latest[0]), cy: y(latest[1]), r: 4, fill: latestLv === null ? "var(--accent)" : lvlColor(latestLv), stroke: "var(--card)", "stroke-width": 2}, svg);
   svgEl("text", {x: x(latest[0]) + 8, y: y(latest[1]) + 4, style: "fill:var(--text);font-weight:600"}, svg).textContent = latest[1];
 
   // crosshair + tooltip, snapping to the nearest reading
@@ -403,8 +444,12 @@ function drawChart() {
     const p = pts.reduce((a, b) => Math.abs(b[0] - t) < Math.abs(a[0] - t) ? b : a);
     const cx = x(p[0]), cy = y(p[1]);
     cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); cross.setAttribute("visibility", "visible");
+    const pl = lv(p[1]);
     dot.setAttribute("cx", cx); dot.setAttribute("cy", cy); dot.setAttribute("visibility", "visible");
+    dot.setAttribute("fill", pl === null ? "var(--accent)" : lvlColor(pl));
     const b = Object.assign(document.createElement("b"), {textContent: `${p[1]}${unit ? " " + unit : ""}`});
+    if (pl !== null) b.append(" ", Object.assign(document.createElement("span"), {textContent: LEVELS[pl], style: "font-weight:400"}));
+    if (pl !== null) b.prepend(dotEl(pl));
     tip.replaceChildren(b, document.createTextNode(fmtTime(p[0])));
     tip.hidden = false;
     const left = cx * r.width / W;
