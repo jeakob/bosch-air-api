@@ -30,7 +30,7 @@ PORT = int(os.environ.get("PORT", "8080"))
 PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
 TICK_SECONDS = 60
 MAX_RETRY_SECONDS = 30 * 60
-STALE_SECONDS = 2 * 3600  # older sensor readings count as unknown
+STALE_SECONDS = 2 * 3600  # readings received longer ago count as unknown
 MODES = ("auto", "on", "off", "paused")
 DEFAULT_CONFIG = {
     "mode": "paused",  # auto: follow rules; on/off: force; paused: never touch the ring
@@ -243,6 +243,7 @@ class Device:
         self.reported = {}
         self.sensor = self.meta = None
         self.sensor_at = None
+        self.sensor_received = 0.0  # epoch seconds; the purifier's own timestamps can run hours behind
         self.seen = set()
         self.history = load_history()
         self.keep_seconds = DEFAULT_CONFIG["history_days"] * 86400
@@ -292,6 +293,7 @@ class Device:
                 stamped = [i for i in items if isinstance(i, dict) and isinstance(i.get("timestamp"), (int, float))]
                 self.sensor = max(stamped, key=lambda i: i["timestamp"]) if stamped else items[-1]  # batch order unknown
                 self.sensor_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                self.sensor_received = time.time()
                 self.add_history(stamped)
             elif channel == "topics/meta":
                 self.meta = payload
@@ -332,11 +334,10 @@ def tick():
     device.refresh()
     time.sleep(3)  # let the shadow reply land before deciding
     with device.lock:
-        reading, current = device.sensor, device.reported.get("lightEnabled")
+        reading, current, received = device.sensor, device.reported.get("lightEnabled"), device.sensor_received
         device.keep_seconds = cfg["history_days"] * 86400
         device.add_history([])  # applies a shortened retention
-    stamp = (reading or {}).get("timestamp")
-    if isinstance(stamp, (int, float)) and now.timestamp() - stamp > STALE_SECONDS:
+    if now.timestamp() - received > STALE_SECONDS:  # judged by arrival: device timestamps lag by hours
         reading = None
     want = wanted_light(cfg, now, reading)
     rule = cfg["air_quality"]

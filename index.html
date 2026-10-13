@@ -154,7 +154,7 @@
       <div><label for="aq-good">Good limit</label><input id="aq-good" placeholder="e.g. 12 or good"></div>
       <div><label for="history-days">Keep history (days)</label><input id="history-days" type="number" min="1" max="365" step="1" inputmode="numeric"></div>
     </div>
-    <p class="hint">Good means at or below a number limit, or equal to a text limit. The purifier pushes readings on its own schedule; without one from the last 2 hours, air counts as good. History keeps 1 to 365 days; shortening it deletes older readings.</p>
+    <p class="hint">Good means at or below a number limit, or equal to a text limit. The purifier pushes readings on its own schedule; without one received in the last 2 hours, air counts as good. History keeps 1 to 365 days; shortening it deletes older readings.</p>
     <details><summary class="hint">Latest sensor reading <span id="sensor-at"></span></summary><pre id="sensor">Waiting for the purifier to publish…</pre></details>
     <details><summary class="hint">Sensor metadata (ranges and allowed values)</summary><pre id="meta">–</pre></details>
   </section>
@@ -353,12 +353,14 @@ function drawChart() {
 
   const unit = lastStatus?.meta?.topics?.sensor?.[chartField]?.unit || "";
   const span = range === "all" ? (config?.history_days || 7) * 86400 : range;
-  const now = Date.now() / 1000, from = now - span;
-  const pts = readings.filter(r => r.timestamp >= from && typeof r[chartField] === "number").map(r => [r.timestamp, r[chartField]]);
+  // The purifier's data can run hours behind; then end the chart at its newest reading instead of showing nothing.
+  const now = Date.now() / 1000, newest = readings.findLast(r => typeof r[chartField] === "number")?.timestamp;
+  const behind = newest !== undefined && newest < now - span, end = behind ? newest : now, from = end - span;
+  const pts = readings.filter(r => r.timestamp >= from && r.timestamp <= end && typeof r[chartField] === "number").map(r => [r.timestamp, r[chartField]]);
   const good = rule.field === chartField && typeof rule.good === "number" ? rule.good : null;
   const latest = pts[pts.length - 1];
 
-  $("c-label").textContent = chartField ? `${chartField}${unit ? " (" + unit + ")" : ""} · latest` : "Air quality";
+  $("c-label").textContent = chartField ? `${chartField}${unit ? " (" + unit + ")" : ""} · ${behind ? "newest the purifier has sent" : "latest"}` : "Air quality";
   $("c-value").textContent = latest ? latest[1].toLocaleString() : "–";
   const limits = levelLimits(chartField), lv = v => limits ? levelOf(chartField, v) : null;
   const latestLv = latest ? lv(latest[1]) : null;
@@ -406,7 +408,7 @@ function drawChart() {
   }
   let xStep = span <= 3600 ? 900 : span <= 43200 ? 2 * 3600 : span <= 86400 ? 6 * 3600 : niceStep(span / 86400, 7) * 86400;
   while (span / xStep * 56 > iw) xStep *= 2;  // keep time labels at least ~56px apart on narrow screens
-  for (let t = Math.ceil(from / xStep) * xStep; t <= now; t += xStep) {
+  for (let t = Math.ceil(from / xStep) * xStep; t <= end; t += xStep) {
     svgEl("text", {x: x(t), y: H - 6, "text-anchor": "middle"}, svg).textContent =
       span <= 86400 ? fmt(t, {hour: "2-digit", minute: "2-digit"}) : span <= 14 * 86400 ? fmt(t, {weekday: "short", day: "numeric"}) : fmt(t, {day: "numeric", month: "short"});
   }
