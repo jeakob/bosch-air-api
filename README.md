@@ -126,9 +126,9 @@ Never commit or share: `snapshots.json`, `~/.config/bosch-air/token.json`, redir
 
 - [x] Login and Bacon device discovery
 - [x] Ring field identified (`lightEnabled`)
-- [ ] First live `light off` / `light on` run against the device
+- [x] First live `light off` / `light on` run against the device
 - [x] Dashboard with sunrise/sunset, time windows and air-quality rule
-- [ ] Confirm the air-quality sensor field on a live device
+- [x] Confirm the air-quality sensor field on a live device
 - [ ] Home Assistant switch (e.g. `command_line` switch calling `bosch_air.py`)
 
 ## Credits
