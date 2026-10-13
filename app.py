@@ -25,6 +25,7 @@ from discover import RedirectError, authorization_code, exchange_code, request_j
 from snapshot import AGENT, DEVICES, connect, jwt_claims  # noqa: E402
 
 CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
+HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
 PORT = int(os.environ.get("PORT", "8080"))
 PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
 TICK_SECONDS = 60
@@ -37,6 +38,7 @@ DEFAULT_CONFIG = {
     "longitude": -0.13,
     "windows": [{"start": "18:00", "end": "23:00", "air_only": False}],
     "air_quality": {"enabled": False, "field": "", "good": None},
+    "history_days": 7,  # sensor readings kept for the dashboard chart
 }
 ENDPOINT = re.compile(r"^(?:([01]\d|2[0-3]):([0-5]\d)|(sunrise|sunset)([+-]\d{1,3})?)$")
 
@@ -156,10 +158,15 @@ def validate(cfg):
     good = aq.get("good")
     if good is not None and (isinstance(good, bool) or not isinstance(good, (int, float, str))):
         raise ValueError("air_quality good must be a number or text")
+    days = cfg.get("history_days", DEFAULT_CONFIG["history_days"])  # absent in configs saved before it existed
+    # ponytail: whole history rewritten per reading; ~1.5 MB at 365 days of 30-min readings, fine on a Pi
+    if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 365:
+        raise ValueError("history_days must be a whole number from 1 to 365")
     return {
         "mode": cfg["mode"], "timezone": str(cfg["timezone"]), "latitude": lat, "longitude": lon,
         "windows": [{"start": w["start"], "end": w["end"], "air_only": w.get("air_only", False)} for w in windows],
         "air_quality": {"enabled": aq["enabled"], "field": aq["field"][:64], "good": good},
+        "history_days": days,
     }
 
 
@@ -178,6 +185,30 @@ def save_config(cfg):
     os.replace(tmp, CONFIG_FILE)
 
 
+def merge_history(history, items, now, keep_seconds):
+    """Add sensor readings, newest timestamp wins per second; keep the last keep_seconds, oldest first."""
+    by_ts = {r["timestamp"]: r for r in history}
+    for item in items:
+        if isinstance(item, dict) and isinstance(item.get("timestamp"), (int, float)):
+            by_ts[item["timestamp"]] = item
+    return [by_ts[t] for t in sorted(by_ts) if now - t <= keep_seconds]
+
+
+def load_history():
+    try:
+        with open(HISTORY_FILE) as f:
+            return merge_history([], json.load(f), time.time(), 365 * 86400)  # tick() trims to the setting
+    except (OSError, ValueError):
+        return []
+
+
+def save_history(history):
+    tmp = HISTORY_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(history, f)
+    os.replace(tmp, HISTORY_FILE)
+
+
 # -- device --------------------------------------------------------------------
 
 class Device:
@@ -191,6 +222,9 @@ class Device:
         self.reported = {}
         self.sensor = self.meta = None
         self.sensor_at = None
+        self.seen = set()
+        self.history = load_history()
+        self.keep_seconds = DEFAULT_CONFIG["history_days"] * 86400
 
     def ensure_connected(self):
         if self.client and self.client.is_connected() and time.time() < self.expires - 300:
@@ -219,6 +253,9 @@ class Device:
         if not msg.topic.startswith(self._topic("")):
             return
         channel = msg.topic[len(self._topic("")):]
+        if channel not in self.seen:  # first sighting per channel, to find where live readings arrive
+            self.seen.add(channel)
+            log(f"mqtt channel {channel}")
         try:
             payload = json.loads(msg.payload)
         except ValueError:
@@ -230,11 +267,24 @@ class Device:
                     self.reported.update(reported)
             elif channel == "topics/sensor":
                 items = payload.get("items") if isinstance(payload, dict) else None
-                self.sensor = items[-1] if isinstance(items, list) and items else payload
+                items = items if isinstance(items, list) and items else [payload]
+                stamped = [i for i in items if isinstance(i, dict) and isinstance(i.get("timestamp"), (int, float))]
+                self.sensor = max(stamped, key=lambda i: i["timestamp"]) if stamped else items[-1]  # batch order unknown
                 self.sensor_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                self.add_history(stamped)
             elif channel == "topics/meta":
                 self.meta = payload
             # topics/info is deliberately ignored: it carries Matter onboarding secrets.
+
+    def add_history(self, items):
+        """Call with self.lock held."""
+        merged = merge_history(self.history, items, time.time(), self.keep_seconds)
+        if merged != self.history:
+            self.history = merged
+            try:
+                save_history(merged)  # a few writes an hour at most; fine for an SD card
+            except OSError as exc:
+                log(f"history not saved: {exc}")
 
     def refresh(self):
         self.client.publish(self._topic("shadows/state/get"), "")
@@ -262,6 +312,8 @@ def tick():
     time.sleep(3)  # let the shadow reply land before deciding
     with device.lock:
         reading, current = device.sensor, device.reported.get("lightEnabled")
+        device.keep_seconds = cfg["history_days"] * 86400
+        device.add_history([])  # applies a shortened retention
     stamp = (reading or {}).get("timestamp")
     if isinstance(stamp, (int, float)) and now.timestamp() - stamp > STALE_SECONDS:
         reading = None
@@ -343,6 +395,10 @@ class Handler(BaseHTTPRequestHandler):
                         "sensor": device.sensor, "sensor_at": device.sensor_at, "meta": device.meta}
             self._send(200, {"config": cfg, "logged_in": os.path.exists(os.environ["BOSCH_AIR_TOKEN_FILE"]),
                              "sun": today_sun(cfg), **live, **status})
+        elif self.path == "/api/history":
+            with device.lock:
+                history = list(device.history)
+            self._send(200, {"readings": history})
         else:
             self._send(404, {"error": "not found"})
 

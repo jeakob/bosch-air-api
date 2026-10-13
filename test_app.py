@@ -1,7 +1,7 @@
 import unittest
 from datetime import date, datetime, timezone
 
-from app import air_not_good, in_window, sun_times, validate, wanted_light
+from app import air_not_good, in_window, merge_history, sun_times, validate, wanted_light
 
 LONDON = {"mode": "auto", "timezone": "Europe/London", "latitude": 51.5, "longitude": -0.13,
           "windows": [], "air_quality": {"enabled": False, "field": "", "good": None}}
@@ -66,12 +66,25 @@ class AirTest(unittest.TestCase):
         self.assertFalse(wanted_light(cfg, noon, None))
 
 
+class HistoryTest(unittest.TestCase):
+    def test_merge_sorts_dedupes_and_prunes(self):
+        keep = 7 * 86400
+        now = 10 * keep
+        old = {"timestamp": now - keep - 1, "pm2.5": 9}
+        history = merge_history([old], [{"timestamp": now, "pm2.5": 290}, {"timestamp": now - 60, "pm2.5": 5},
+                                        {"pm2.5": 1}, "junk"], now, keep)
+        self.assertEqual([r["pm2.5"] for r in history], [5, 290])
+        again = merge_history(history, [{"timestamp": now, "pm2.5": 291}], now, keep)
+        self.assertEqual([r["pm2.5"] for r in again], [5, 291])
+
+
 class ValidateTest(unittest.TestCase):
     def test_rejects_bad_input(self):
         for bad in ({**LONDON, "mode": "x"}, {**LONDON, "timezone": "Mars/Base"},
                     {**LONDON, "windows": [{"start": "25:00", "end": "01:00"}]},
                     {**LONDON, "latitude": None, "windows": [{"start": "sunset", "end": "23:00"}]},
-                    {**LONDON, "windows": [{"start": "10:00", "end": "11:00", "air_only": True}]}):
+                    {**LONDON, "windows": [{"start": "10:00", "end": "11:00", "air_only": True}]},
+                    {**LONDON, "history_days": 0}, {**LONDON, "history_days": 400}, {**LONDON, "history_days": "7"}):
             with self.assertRaises(ValueError):
                 validate(bad)
         self.assertEqual(validate(LONDON)["timezone"], "Europe/London")
