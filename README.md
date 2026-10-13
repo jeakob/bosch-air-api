@@ -49,6 +49,8 @@ Authorization codes are single-use and expire quickly. If a step fails, run the 
 
 ## Dashboard (Docker)
 
+<img src="docs/dashboard.png" alt="Dashboard in dark mode: ring status, PM2.5 history chart with the good limit, mode buttons and time windows" width="600">
+
 A small web dashboard and scheduler in one container. It keeps a persistent MQTT session to the purifier and checks every minute whether the ring should be on:
 
 - **Time windows:** the ring is on while any window is active, whatever the air quality, unless the window is marked **Only if air not good**; then it also needs air quality outside the good range. Start and end can be `HH:MM`, `sunrise`, `sunset`, or an offset such as `sunset+30` or `sunrise-15`. A window whose end is earlier than its start runs past midnight.
