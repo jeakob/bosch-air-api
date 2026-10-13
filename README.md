@@ -4,6 +4,18 @@ Turn the LED air-quality ring of a **Bosch Air 2000i** air purifier on and off f
 
 Unofficial, not affiliated with Bosch. Use it only with your own account and device.
 
+## Quick start
+
+```bash
+docker run -d --name bosch-air --restart unless-stopped \
+  -p 8080:8080 \
+  -e DASHBOARD_PASSWORD=change-me-to-something-long \
+  -v bosch-air-data:/data \
+  ghcr.io/jeakob/bosch-air-api:latest
+```
+
+Open `http://<host>:8080`, sign in with any username and that password, then click **Start login** to connect your Bosch account (see [Logging in](#logging-in)). Works on Raspberry Pi (arm64, armv7) and amd64. For Docker Compose or Portainer, see [Run it](#run-it-raspberry-pi-or-any-docker-host).
+
 ## Requirements
 
 - Python 3.10+ (tested on 3.13, Debian 13)

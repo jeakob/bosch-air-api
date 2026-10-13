@@ -35,7 +35,7 @@
   .chart-now b { display:block; font-size:32px; font-weight:600; line-height:1.1; }
   .chart-now span { display:block; color:var(--muted); font-size:13px; }
   .chart-now span.on { color:var(--ok); } .chart-now span.err { color:var(--bad); }
-  .chart-controls { display:flex; gap:8px; align-items:center; }
+  .chart-controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
   .chart-controls select { width:auto; padding:5px 8px; }
   .chart-controls button { padding:5px 10px; font-size:13px; }
   #chart { position:relative; touch-action:pan-y; }
@@ -73,6 +73,8 @@
       <div class="chart-now"><span id="c-label">Air quality</span><b id="c-value">–</b><span id="c-state"></span></div>
       <div class="chart-controls">
         <select id="c-field" aria-label="Sensor field"></select>
+        <button data-range="3600">1 h</button>
+        <button data-range="43200">12 h</button>
         <button data-range="86400" aria-pressed="true">24 h</button>
         <button data-range="604800">7 days</button>
         <button data-range="all">All</button>
@@ -334,7 +336,7 @@ function drawChart() {
   const yStep = niceStep(top, 4), yMax = Math.ceil(top * 1.05 / yStep) * yStep;
   const x = t => m.l + (t - from) / span * iw, y = v => m.t + ih - v / yMax * ih;
   const svg = svgEl("svg", {viewBox: `0 0 ${W} ${H}`, height: H, role: "img",
-    "aria-label": `${chartField} over the last ${span / 86400 === 1 ? "24 hours" : span / 86400 + " days"}, latest ${latest[1]}`});
+    "aria-label": `${chartField} over the last ${span < 86400 ? (span === 3600 ? "hour" : span / 3600 + " hours") : span === 86400 ? "24 hours" : span / 86400 + " days"}, latest ${latest[1]}`});
 
   // the rule's limit
   if (good !== null && good < yMax) {
@@ -345,7 +347,8 @@ function drawChart() {
     svgEl("line", {x1: m.l, x2: m.l + iw, y1: y(v), y2: y(v), stroke: "var(--line)", "stroke-width": 1}, svg);
     svgEl("text", {x: m.l - 6, y: y(v) + 4, "text-anchor": "end"}, svg).textContent = v >= 1000 ? v / 1000 + "K" : v;
   }
-  const xStep = span <= 86400 ? 6 * 3600 : niceStep(span / 86400, 7) * 86400;
+  let xStep = span <= 3600 ? 900 : span <= 43200 ? 2 * 3600 : span <= 86400 ? 6 * 3600 : niceStep(span / 86400, 7) * 86400;
+  while (span / xStep * 56 > iw) xStep *= 2;  // keep time labels at least ~56px apart on narrow screens
   for (let t = Math.ceil(from / xStep) * xStep; t <= now; t += xStep) {
     svgEl("text", {x: x(t), y: H - 6, "text-anchor": "middle"}, svg).textContent =
       span <= 86400 ? fmt(t, {hour: "2-digit", minute: "2-digit"}) : span <= 14 * 86400 ? fmt(t, {weekday: "short", day: "numeric"}) : fmt(t, {day: "numeric", month: "short"});
