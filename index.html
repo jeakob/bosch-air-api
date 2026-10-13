@@ -9,7 +9,12 @@
   @media (prefers-color-scheme: dark) { :root { --bg:#111418; --card:#1a1f25; --text:#e6e9ed; --muted:#9aa5b1; --line:#2c333b; --accent:#4c8dff; --on-accent:#0b1220; --ok:#3fb950; --bad:#ff6b6b; color-scheme: dark; } }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui, sans-serif; }
-  main { max-width:760px; margin:0 auto; padding:24px 16px 48px; }
+  main { max-width:1280px; margin:0 auto; padding:24px 16px 48px; }
+  /* wide screens: summary beside the chart, settings in two balanced columns */
+  .top { display:grid; gap:0 16px; align-items:start; }
+  .settings { columns:2 420px; column-gap:16px; }
+  .settings section { break-inside:avoid; }
+  @media (min-width:1000px) { .top { grid-template-columns:minmax(320px,1fr) 2fr; } }
   h1 { font-size:22px; margin:0 0 16px; }
   h2 { font-size:15px; margin:0 0 12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
   section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
@@ -53,6 +58,7 @@
 <main>
   <h1>Air purifier dashboard</h1>
 
+  <div class="top">
   <section>
     <h2>Now</h2>
     <div class="grid">
@@ -62,6 +68,7 @@
       <div class="stat"><span>Air not good</span><b id="s-air">–</b></div>
       <div class="stat"><span>Sunrise / sunset</span><b id="s-sun">–</b></div>
       <div class="stat"><span>Connection</span><b id="s-conn">–</b></div>
+      <div class="stat"><span>Filter left</span><b id="s-filter">–</b></div>
     </div>
     <p class="hint" id="s-change"></p>
     <p class="hint err" id="s-error"></p>
@@ -82,9 +89,10 @@
     </div>
     <div id="chart"></div>
     <div class="row" style="margin:12px 0 0"><div style="flex:0 0 160px"><label for="history-days">Keep history for (days)</label><input id="history-days" type="number" min="1" max="365" step="1" inputmode="numeric"></div>
-      <p class="hint" style="flex:1;margin:0 0 8px">1 to 365. Shortening it deletes older readings within a minute. Press <em>Save settings</em> to apply.</p></div>
+      <p class="hint" style="flex:1 1 220px;margin:0 0 8px">1 to 365. Shortening it deletes older readings within a minute. Press <em>Save settings</em> to apply.</p></div>
     <details><summary class="hint">Show as table</summary><div class="table-wrap"><table><thead><tr><th>Time</th><th id="t-field">Value</th></tr></thead><tbody id="c-table"></tbody></table></div></details>
   </section>
+  </div>
 
   <section id="login" hidden>
     <h2>Bosch login</h2>
@@ -97,6 +105,7 @@
     <div class="msg" id="login-msg"></div>
   </section>
 
+  <div class="settings">
   <section>
     <h2>Mode</h2>
     <div class="modes" id="modes">
@@ -137,6 +146,7 @@
     <pre id="sensor">Waiting for the purifier to publish…</pre>
     <details><summary class="hint">Sensor metadata (ranges and allowed values)</summary><pre id="meta">–</pre></details>
   </section>
+  </div>
 
   <p><button class="primary" id="save">Save settings</button></p>
   <div class="msg" id="save-msg"></div>
@@ -214,6 +224,8 @@ async function refresh() {
       : `${yesNo(s.air_not_good)} (${s.config.air_quality.field} = ${s.air_value ?? "no recent reading"})`);
     setStat("s-sun", s.sun ? `${s.sun.sunrise} / ${s.sun.sunset}` : "set location");
     setStat("s-conn", s.connected ? "connected" : "offline", s.connected ? "on" : "err");
+    const filter = s.sensor?.filterCapacity;
+    setStat("s-filter", typeof filter === "number" ? `${filter} %` : "–", typeof filter === "number" && filter <= 10 ? "err" : "");
     $("s-change").textContent = s.last_change ? `Last change: ${s.last_change}` : "";
     $("s-error").textContent = s.error || "";
     $("login").hidden = s.logged_in;
