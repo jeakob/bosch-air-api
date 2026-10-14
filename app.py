@@ -6,6 +6,7 @@ so pushed sensor readings are captured; re-evaluates every TICK_SECONDS.
 """
 
 import base64
+import csv
 import hmac
 import io
 import json
@@ -34,7 +35,8 @@ PORT = int(os.environ.get("PORT", "8080"))
 PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
 TICK_SECONDS = 60
 MAX_RETRY_SECONDS = 30 * 60
-STALE_SECONDS = 2 * 3600  # readings received longer ago count as unknown
+STALE_SECONDS = 2 * 3600  # older sensor readings count as unknown
+EXPORT_SECONDS = 30 * 60  # the purifier uploads a reading to the cloud history every 30 minutes
 MODES = ("auto", "on", "off", "paused")
 EXPORT_HOST = "prod-euc1-bosch-bacon-history-export.s3.eu-central-1.amazonaws.com"  # only download exports from here
 DEFAULT_CONFIG = {
@@ -191,6 +193,39 @@ def save_config(cfg):
     os.replace(tmp, CONFIG_FILE)
 
 
+def parse_stamp(value):
+    """Epoch seconds from epoch seconds, epoch milliseconds or an ISO date (naive means UTC); None if neither."""
+    try:
+        n = float(value)
+        return int(n / 1000 if n > 1e11 else n)
+    except (TypeError, ValueError):
+        pass
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return int((dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).timestamp())
+
+
+def parse_export(text):
+    """Cloud history export CSV -> readings shaped like topics/sensor ones."""
+    readings = []
+    for row in csv.DictReader(io.StringIO(text)):
+        row = {k.split(" [")[0]: v for k, v in row.items() if k}  # "pm2_5 [µg/m3]" -> "pm2_5"
+        reading = {"timestamp": parse_stamp(row.get("timestamp"))}
+        if reading["timestamp"] is None:
+            continue
+        for field in ("airQuality", "pm2_5", "filterCapacity"):
+            try:
+                reading[field] = int(float(row[field]))
+            except (KeyError, TypeError, ValueError):
+                pass
+        if "pm2_5" in reading:
+            reading["pm2.5"] = reading["pm2_5"]
+        readings.append(reading)
+    return readings
+
+
 def merge_history(history, items, now, keep_seconds):
     """Add sensor readings, newest timestamp wins per second; keep the last keep_seconds, oldest first."""
     by_ts = {r["timestamp"]: r for r in history}
@@ -248,11 +283,11 @@ class Device:
         self.reported = {}
         self.sensor = self.meta = None
         self.sensor_at = None
-        self.sensor_received = 0.0  # epoch seconds; the purifier's own timestamps can run hours behind
         self.seen = set()
         self.fields = {}  # shadow name -> reported field names, to find a publish-interval setting
         self.history = load_history()
-        self.export = None  # progress of the cloud history export test (no link, no values)
+        self.export = None  # progress of the latest cloud history export (no link)
+        self.next_export = 0.0  # epoch seconds; the first export covers all of keep_seconds
         self.keep_seconds = DEFAULT_CONFIG["history_days"] * 86400
 
     def ensure_connected(self):
@@ -268,12 +303,13 @@ class Device:
         self.client, _ = connect(token, self.sub)
         self.client.on_message = self._on_message
         log("connected")
-        if self.export is None:
-            self.request_export(2 * 86400)
 
-    def request_export(self, seconds):
-        """Ask the cloud for the purifier's stored history, as the app's "Download historic data" does."""
+    def request_export(self):
+        """Ask the cloud for the purifier's stored history, as the app's "Download historic data" does.
+        The first request covers all kept history, later ones the last day."""
         now = int(time.time())
+        seconds = self.keep_seconds if not self.next_export else 86400
+        self.next_export = now + EXPORT_SECONDS
         self.export = {"state": "requested", "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         self.client.publish(f"users/{self.sub}/commands/export", json.dumps(
             {"serialNumbers": [self.serial], "between": [now - seconds, now], "features": ["AP_BASE"]}))
@@ -294,27 +330,33 @@ class Device:
                 threading.Thread(target=self._fetch_export, args=(link,), daemon=True).start()
 
     def _fetch_export(self, link):
-        """Download the export zip; record each file's name, size, line count and header line, not its values."""
-        hide = lambda text: text.replace(self.serial, "XXX")
+        """Download the export zip and add its readings to the history."""
         try:
             with urllib.request.urlopen(link, timeout=60) as resp:
                 data = resp.read(50_000_001)
             if len(data) > 50_000_000:
                 raise ValueError("export larger than 50 MB")
-            files = []
+            readings = []
             with zipfile.ZipFile(io.BytesIO(data)) as zf:
                 for info in zf.infolist():
                     if info.file_size > 200_000_000:
                         raise ValueError(f"{info.filename} unpacks to over 200 MB")
-                    lines = zf.read(info).decode("utf-8", "replace").splitlines()
-                    files.append({"name": hide(info.filename), "bytes": info.file_size, "lines": len(lines),
-                                  "header": hide(lines[0][:500]) if lines else ""})
-            result = {"files": files, "zip_bytes": len(data)}
+                    if info.filename.endswith(".csv"):
+                        readings += parse_export(zf.read(info).decode("utf-8-sig", "replace"))
         except Exception as exc:  # report, don't kill the thread silently
-            result = {"download_error": str(exc)}
+            with self.lock:
+                self.export["download_error"] = str(exc)
+            log(f"history export download failed: {exc}")
+            return
+        newest = max(readings, key=lambda r: r["timestamp"], default=None)
         with self.lock:
-            self.export.update(result)
-        log(f"history export contents {json.dumps(result)}")
+            self.add_history(readings)
+            if newest and (not self.sensor or newest["timestamp"] > self.sensor.get("timestamp", 0)):
+                self.sensor = newest
+                self.sensor_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            self.export.update(imported=len(readings), newest=newest and datetime.fromtimestamp(
+                newest["timestamp"], timezone.utc).isoformat(timespec="seconds"))
+        log(f"history export imported {len(readings)} readings")
 
     def close(self):
         if self.client:
@@ -358,8 +400,8 @@ class Device:
                 # The broker replays the last batch on every connect; only newer readings count as received now.
                 if known is None or not stamped or newest["timestamp"] > known:
                     self.sensor_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-                    self.sensor_received = time.time()
-                self.sensor = newest
+                if not self.sensor or newest.get("timestamp", 0) >= self.sensor.get("timestamp", 0):
+                    self.sensor = newest
                 self.add_history(stamped)
             elif channel == "topics/meta":
                 self.meta = payload
@@ -399,14 +441,17 @@ def log(message):
 def tick():
     cfg = load_config()
     now = datetime.now(timezone.utc)
+    device.keep_seconds = cfg["history_days"] * 86400
     device.ensure_connected()
     device.refresh()
+    if time.time() >= device.next_export:
+        device.request_export()
     time.sleep(3)  # let the shadow reply land before deciding
     with device.lock:
-        reading, current, received = device.sensor, device.reported.get("lightEnabled"), device.sensor_received
-        device.keep_seconds = cfg["history_days"] * 86400
+        reading, current = device.sensor, device.reported.get("lightEnabled")
         device.add_history([])  # applies a shortened retention
-    if now.timestamp() - received > STALE_SECONDS:  # judged by arrival: device timestamps lag by hours
+    stamp = (reading or {}).get("timestamp")
+    if isinstance(stamp, (int, float)) and now.timestamp() - stamp > STALE_SECONDS:
         reading = None
     want = wanted_light(cfg, now, reading)
     rule = cfg["air_quality"]

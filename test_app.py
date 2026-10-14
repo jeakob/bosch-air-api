@@ -1,7 +1,8 @@
 import unittest
 from datetime import date, datetime, timezone
 
-from app import air_not_good, filter_estimate, in_window, merge_history, retry_delay, sun_times, validate, wanted_light
+from app import (air_not_good, filter_estimate, in_window, merge_history, parse_export, retry_delay, sun_times, validate,
+                 wanted_light)
 
 LONDON = {"mode": "auto", "timezone": "Europe/London", "latitude": 51.5, "longitude": -0.13,
           "windows": [], "air_quality": {"enabled": False, "field": "", "good": None}}
@@ -76,6 +77,19 @@ class HistoryTest(unittest.TestCase):
         self.assertEqual([r["pm2.5"] for r in history], [5, 290])
         again = merge_history(history, [{"timestamp": now, "pm2.5": 291}], now, keep)
         self.assertEqual([r["pm2.5"] for r in again], [5, 291])
+
+
+class ExportTest(unittest.TestCase):
+    def test_parses_cloud_csv_with_any_timestamp_format(self):
+        csv_text = ("timestamp,airQuality,fanSpeed,filterCapacity [%],opMode,pm2_5 [µg/m3]\n"
+                    "1791964800,1,2,95,auto,4\n"
+                    "1791966600000,2,2,95,auto,14.0\n"
+                    "2026-10-14T09:00:00Z,1,1,95,silent,\n"
+                    "not a time,1,1,95,auto,3\n")
+        rows = parse_export(csv_text)
+        self.assertEqual([r["timestamp"] for r in rows], [1791964800, 1791966600, 1791968400])
+        self.assertEqual(rows[1], {"timestamp": 1791966600, "airQuality": 2, "pm2_5": 14, "filterCapacity": 95, "pm2.5": 14})
+        self.assertNotIn("pm2.5", rows[2])  # empty cell: no value rather than 0
 
 
 class FilterTest(unittest.TestCase):
