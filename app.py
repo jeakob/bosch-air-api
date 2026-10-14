@@ -7,12 +7,15 @@ so pushed sensor readings are captured; re-evaluates every TICK_SECONDS.
 
 import base64
 import hmac
+import io
 import json
 import math
 import os
 import re
 import threading
 import time
+import urllib.request
+import zipfile
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
@@ -33,6 +36,7 @@ TICK_SECONDS = 60
 MAX_RETRY_SECONDS = 30 * 60
 STALE_SECONDS = 2 * 3600  # readings received longer ago count as unknown
 MODES = ("auto", "on", "off", "paused")
+EXPORT_HOST = "prod-euc1-bosch-bacon-history-export.s3.eu-central-1.amazonaws.com"  # only download exports from here
 DEFAULT_CONFIG = {
     "mode": "paused",  # auto: follow rules; on/off: force; paused: never touch the ring
     "timezone": "Europe/London",
@@ -248,7 +252,7 @@ class Device:
         self.seen = set()
         self.fields = {}  # shadow name -> reported field names, to find a publish-interval setting
         self.history = load_history()
-        self.export = None  # progress of the cloud history export test (state and link host only)
+        self.export = None  # progress of the cloud history export test (no link, no values)
         self.keep_seconds = DEFAULT_CONFIG["history_days"] * 86400
 
     def ensure_connected(self):
@@ -284,6 +288,33 @@ class Device:
             self.export.update({k: payload.get(k) for k in ("state", "errorMessage", "ttl")},
                                link_host=urlsplit(link).hostname if isinstance(link, str) else None)
         log(f"history export {payload.get('state')}{': ' + str(payload['errorMessage']) if payload.get('errorMessage') else ''}")
+        if payload.get("state") == "SUCCEEDED" and isinstance(link, str):
+            parts = urlsplit(link)
+            if parts.scheme == "https" and parts.hostname == EXPORT_HOST:
+                threading.Thread(target=self._fetch_export, args=(link,), daemon=True).start()
+
+    def _fetch_export(self, link):
+        """Download the export zip; record each file's name, size, line count and header line, not its values."""
+        hide = lambda text: text.replace(self.serial, "XXX")
+        try:
+            with urllib.request.urlopen(link, timeout=60) as resp:
+                data = resp.read(50_000_001)
+            if len(data) > 50_000_000:
+                raise ValueError("export larger than 50 MB")
+            files = []
+            with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                for info in zf.infolist():
+                    if info.file_size > 200_000_000:
+                        raise ValueError(f"{info.filename} unpacks to over 200 MB")
+                    lines = zf.read(info).decode("utf-8", "replace").splitlines()
+                    files.append({"name": hide(info.filename), "bytes": info.file_size, "lines": len(lines),
+                                  "header": hide(lines[0][:500]) if lines else ""})
+            result = {"files": files, "zip_bytes": len(data)}
+        except Exception as exc:  # report, don't kill the thread silently
+            result = {"download_error": str(exc)}
+        with self.lock:
+            self.export.update(result)
+        log(f"history export contents {json.dumps(result)}")
 
     def close(self):
         if self.client:
