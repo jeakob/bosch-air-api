@@ -430,6 +430,8 @@ class Handler(BaseHTTPRequestHandler):
             with device.lock:
                 live = {"connected": bool(device.client and device.client.is_connected()),
                         "light": device.reported.get("lightEnabled"),
+                        "power": device.reported.get("powerEnabled"), "op_mode": device.reported.get("opMode"),
+                        "fan_speed": device.reported.get("fanSpeed"),
                         "sensor": device.sensor, "sensor_at": device.sensor_at, "meta": device.meta,
                         "filter": filter_estimate(device.history)}
             self._send(200, {"config": cfg, "logged_in": os.path.exists(os.environ["BOSCH_AIR_TOKEN_FILE"]),

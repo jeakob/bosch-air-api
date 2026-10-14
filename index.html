@@ -77,6 +77,8 @@
       <div class="stat"><span>Air not good</span><b id="s-air">–</b></div>
       <div class="stat"><span>Sunrise / sunset</span><b id="s-sun">–</b></div>
       <div class="stat"><span>Connection</span><b id="s-conn">–</b></div>
+      <div class="stat"><span>Purifier</span><b id="s-power">–</b></div>
+      <div class="stat"><span>Fan mode</span><b id="s-mode">–</b></div>
       <div class="stat"><span>Filter left</span><b id="s-filter">–</b></div>
       <div class="stat"><span>Replace filter</span><b id="s-replace">–</b></div>
     </div>
@@ -239,6 +241,9 @@ async function refresh() {
     if (s.light && ringLv !== null) { $("s-light").prepend(dotEl(ringLv)); $("s-light").title = `Ring shows ${LEVELS[ringLv].toLowerCase()} (PM2.5 ${pm})`; }
     setStat("s-sun", s.sun ? `${s.sun.sunrise} / ${s.sun.sunset}` : "set location");
     setStat("s-conn", s.connected ? "connected" : "offline", s.connected ? "on" : "err");
+    setStat("s-power", s.power == null ? "–" : onOff(s.power), s.power ? "on" : "off");
+    setStat("s-mode", {auto: "auto", silent: "sleep (silent)", manual: `manual${s.fan_speed ? ", speed " + s.fan_speed : ""}`}[s.op_mode] ?? s.op_mode ?? "–",
+      s.power === false ? "off" : "");
     const filter = s.sensor?.filterCapacity;
     setStat("s-filter", typeof filter === "number" ? `${filter} %` : "–", typeof filter === "number" && filter <= 10 ? "err" : "");
     const est = s.filter;
