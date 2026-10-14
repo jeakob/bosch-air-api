@@ -291,9 +291,13 @@ class Device:
                 items = payload.get("items") if isinstance(payload, dict) else None
                 items = items if isinstance(items, list) and items else [payload]
                 stamped = [i for i in items if isinstance(i, dict) and isinstance(i.get("timestamp"), (int, float))]
-                self.sensor = max(stamped, key=lambda i: i["timestamp"]) if stamped else items[-1]  # batch order unknown
-                self.sensor_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-                self.sensor_received = time.time()
+                newest = max(stamped, key=lambda i: i["timestamp"]) if stamped else items[-1]  # batch order unknown
+                known = self.history[-1]["timestamp"] if self.history else None
+                # The broker replays the last batch on every connect; only newer readings count as received now.
+                if known is None or not stamped or newest["timestamp"] > known:
+                    self.sensor_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                    self.sensor_received = time.time()
+                self.sensor = newest
                 self.add_history(stamped)
             elif channel == "topics/meta":
                 self.meta = payload
