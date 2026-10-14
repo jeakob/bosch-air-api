@@ -439,6 +439,7 @@ class Handler(BaseHTTPRequestHandler):
                         "light": device.reported.get("lightEnabled"),
                         "power": device.reported.get("powerEnabled"), "op_mode": device.reported.get("opMode"),
                         "fan_speed": device.reported.get("fanSpeed"),
+                        "publish_interval": device.reported.get("dataLakeBasePublishInterval"),
                         "sensor": device.sensor, "sensor_at": device.sensor_at, "meta": device.meta,
                         "shadow_fields": device.fields,
                         "filter": filter_estimate(device.history)}
