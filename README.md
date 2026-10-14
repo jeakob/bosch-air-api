@@ -61,7 +61,7 @@ Authorization codes are single-use and expire quickly. If a step fails, run the 
 
 ## Dashboard (Docker)
 
-<img src="docs/dashboard.png" alt="Dashboard in dark mode: ring status, PM2.5 history chart with the good limit, mode buttons and time windows" width="600">
+<img src="docs/dashboard.png" alt="Dashboard in dark mode: ring, purifier and filter status, a 7-day history chart, mode buttons, time windows and the air-quality rule" width="700">
 
 A small web dashboard and scheduler in one container. It keeps a persistent MQTT session to the purifier and checks every minute whether the ring should be on:
 
