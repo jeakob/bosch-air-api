@@ -245,6 +245,7 @@ class Device:
         self.sensor_at = None
         self.sensor_received = 0.0  # epoch seconds; the purifier's own timestamps can run hours behind
         self.seen = set()
+        self.fields = {}  # shadow name -> reported field names, to find a publish-interval setting
         self.history = load_history()
         self.keep_seconds = DEFAULT_CONFIG["history_days"] * 86400
 
@@ -283,10 +284,13 @@ class Device:
         except ValueError:
             return
         with self.lock:
-            if channel.startswith("shadows/state/"):
+            if channel.startswith("shadows/"):
                 reported = (payload.get("state") or {}).get("reported") if isinstance(payload, dict) else None
                 if isinstance(reported, dict):
-                    self.reported.update(reported)
+                    shadow = channel.split("/")[1]
+                    self.fields[shadow] = sorted(set(self.fields.get(shadow, [])) | set(reported))
+                    if shadow == "state":
+                        self.reported.update(reported)
             elif channel == "topics/sensor":
                 items = payload.get("items") if isinstance(payload, dict) else None
                 items = items if isinstance(items, list) and items else [payload]
@@ -315,8 +319,7 @@ class Device:
 
     def refresh(self):
         self.client.publish(self._topic("shadows/state/get"), "")
-        # The purifier only streams topics/sensor while the Bosch app is open; the app sends these two gets on opening.
-        # ponytail: experiment, keep only the one that turns the stream on
+        # Not what starts the sensor stream (tested); kept so shadow_fields lists these shadows' settings too.
         for shadow in ("$package", "schedule"):
             self.client.publish(self._topic(f"shadows/{shadow}/get"), "")
 
@@ -437,6 +440,7 @@ class Handler(BaseHTTPRequestHandler):
                         "power": device.reported.get("powerEnabled"), "op_mode": device.reported.get("opMode"),
                         "fan_speed": device.reported.get("fanSpeed"),
                         "sensor": device.sensor, "sensor_at": device.sensor_at, "meta": device.meta,
+                        "shadow_fields": device.fields,
                         "filter": filter_estimate(device.history)}
             self._send(200, {"config": cfg, "logged_in": os.path.exists(os.environ["BOSCH_AIR_TOKEN_FILE"]),
                              "sun": today_sun(cfg), **live, **status})
