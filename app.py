@@ -15,6 +15,7 @@ import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -247,6 +248,7 @@ class Device:
         self.seen = set()
         self.fields = {}  # shadow name -> reported field names, to find a publish-interval setting
         self.history = load_history()
+        self.export = None  # progress of the cloud history export test (state and link host only)
         self.keep_seconds = DEFAULT_CONFIG["history_days"] * 86400
 
     def ensure_connected(self):
@@ -262,6 +264,26 @@ class Device:
         self.client, _ = connect(token, self.sub)
         self.client.on_message = self._on_message
         log("connected")
+        if self.export is None:
+            self.request_export(2 * 86400)
+
+    def request_export(self, seconds):
+        """Ask the cloud for the purifier's stored history, as the app's "Download historic data" does."""
+        now = int(time.time())
+        self.export = {"state": "requested", "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        self.client.publish(f"users/{self.sub}/commands/export", json.dumps(
+            {"serialNumbers": [self.serial], "between": [now - seconds, now], "features": ["AP_BASE"]}))
+        log("history export requested")
+
+    def _export_progress(self, payload):
+        """Record the export's progress; of the download link keep only its host, not the URL."""
+        if not isinstance(payload, dict):
+            return
+        link = payload.get("link")
+        with self.lock:
+            self.export.update({k: payload.get(k) for k in ("state", "errorMessage", "ttl")},
+                               link_host=urlsplit(link).hostname if isinstance(link, str) else None)
+        log(f"history export {payload.get('state')}{': ' + str(payload['errorMessage']) if payload.get('errorMessage') else ''}")
 
     def close(self):
         if self.client:
@@ -278,6 +300,11 @@ class Device:
             self.seen.add(channel or msg.topic)
             log(f"mqtt channel {channel}" if channel else f"mqtt topic {msg.topic.replace(self.sub, '{sub}')}")
         if channel is None:
+            if msg.topic == f"users/{self.sub}/commands/export/progress":
+                try:
+                    self._export_progress(json.loads(msg.payload))
+                except ValueError:
+                    pass
             return
         try:
             payload = json.loads(msg.payload)
@@ -441,7 +468,7 @@ class Handler(BaseHTTPRequestHandler):
                         "fan_speed": device.reported.get("fanSpeed"),
                         "publish_interval": device.reported.get("dataLakeBasePublishInterval"),
                         "sensor": device.sensor, "sensor_at": device.sensor_at, "meta": device.meta,
-                        "shadow_fields": device.fields,
+                        "shadow_fields": device.fields, "export": device.export,
                         "filter": filter_estimate(device.history)}
             self._send(200, {"config": cfg, "logged_in": os.path.exists(os.environ["BOSCH_AIR_TOKEN_FILE"]),
                              "sun": today_sun(cfg), **live, **status})
