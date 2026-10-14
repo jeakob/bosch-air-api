@@ -272,12 +272,12 @@ class Device:
         return f"users/{self.sub}/devices/{self.serial}/{suffix}"
 
     def _on_message(self, client, userdata, msg):
-        if not msg.topic.startswith(self._topic("")):
+        channel = msg.topic[len(self._topic("")):] if msg.topic.startswith(self._topic("")) else None
+        if (channel or msg.topic) not in self.seen:  # first sighting per topic, to find what starts live readings
+            self.seen.add(channel or msg.topic)
+            log(f"mqtt channel {channel}" if channel else f"mqtt topic {msg.topic.replace(self.sub, '{sub}')}")
+        if channel is None:
             return
-        channel = msg.topic[len(self._topic("")):]
-        if channel not in self.seen:  # first sighting per channel, to find where live readings arrive
-            self.seen.add(channel)
-            log(f"mqtt channel {channel}")
         try:
             payload = json.loads(msg.payload)
         except ValueError:
@@ -315,6 +315,10 @@ class Device:
 
     def refresh(self):
         self.client.publish(self._topic("shadows/state/get"), "")
+        # The purifier only streams topics/sensor while the Bosch app is open; the app sends these two gets on opening.
+        # ponytail: experiment, keep only the one that turns the stream on
+        for shadow in ("$package", "schedule"):
+            self.client.publish(self._topic(f"shadows/{shadow}/get"), "")
 
     def set_light(self, on):
         self.client.publish(self._topic("shadows/state/update"),
