@@ -86,6 +86,7 @@
     </div>
     <p class="hint" id="s-change"></p>
     <p class="hint err" id="s-error"></p>
+    <details id="errors-box" hidden><summary class="hint">Recent errors (<span id="errors-n"></span>)</summary><pre id="errors"></pre></details>
   </section>
 
   <section class="span-2">
@@ -234,16 +235,22 @@ function readForm() {
 async function refresh() {
   try {
     const s = await api("/api/status");
-    setStat("s-light", onOff(s.light), s.light ? "on" : "off");
+    // Offline, the shadow still holds the purifier's last report, which may no longer be true.
+    const stale = s.offline ? `Purifier offline: no new reading since ${s.heard_at}. Last reported: ` : "";
+    setStat("s-light", s.offline ? "unknown" : onOff(s.light) + (s.unconfirmed ? " (change not confirmed)" : ""),
+      s.offline || s.unconfirmed ? "err" : s.light ? "on" : "off");
+    $("s-light").title = s.offline ? stale + onOff(s.light) : s.unconfirmed || "";
     setStat("s-wanted", s.wanted === null ? "leave as is" : onOff(s.wanted));
     setStat("s-window", yesNo(s.in_window));
     setStat("s-air", s.air_not_good === null ? "rule off"
       : `${yesNo(s.air_not_good)} (${s.config.air_quality.field} = ${s.air_value ?? "no recent reading"})`);
     const pm = s.sensor?.["pm2.5"], ringLv = levelOf("pm2.5", pm);
-    if (s.light && ringLv !== null) { $("s-light").prepend(dotEl(ringLv)); $("s-light").title = `Ring shows ${LEVELS[ringLv].toLowerCase()} (PM2.5 ${pm})`; }
+    if (s.light && !s.offline && ringLv !== null) { $("s-light").prepend(dotEl(ringLv)); $("s-light").title = `Ring shows ${LEVELS[ringLv].toLowerCase()} (PM2.5 ${pm})`; }
     setStat("s-sun", s.sun ? `${s.sun.sunrise} / ${s.sun.sunset}` : "set location");
-    setStat("s-conn", s.connected ? "connected" : "offline", s.connected ? "on" : "err");
-    setStat("s-power", s.power == null ? "–" : onOff(s.power), s.power ? "on" : "off");
+    setStat("s-conn", !s.connected ? "offline" : s.offline ? "purifier offline" : "connected", s.connected && !s.offline ? "on" : "err");
+    $("s-conn").title = s.offline ? stale.split(". ")[0] + ". Check its power and Wi-Fi." : "";
+    setStat("s-power", s.offline ? "unknown" : s.power == null ? "–" : onOff(s.power), s.offline ? "err" : s.power ? "on" : "off");
+    $("s-power").title = s.offline ? stale + onOff(s.power) : "";
     setStat("s-mode", {auto: "auto", silent: "sleep (silent)", manual: `manual${s.fan_speed ? ", speed " + s.fan_speed : ""}`}[s.op_mode] ?? s.op_mode ?? "–",
       s.power === false ? "off" : "");
     setStat("s-reading", typeof s.sensor?.timestamp === "number" ? fmtTime(s.sensor.timestamp) : "–");
@@ -257,7 +264,10 @@ async function refresh() {
     $("s-replace").title = est ? `Falling ${est.per_day} % a day over the last ${est.based_on_days} days of history`
       : "Needs a drop of 2 % over at least 2 days in the stored history";
     $("s-change").textContent = s.last_change ? `Last change: ${s.last_change}` : "";
-    $("s-error").textContent = s.error || "";
+    $("s-error").textContent = s.error || s.unconfirmed || "";
+    $("errors-box").hidden = !s.errors?.length;
+    $("errors-n").textContent = s.errors?.length ?? 0;
+    $("errors").textContent = (s.errors || []).join("\n");
     $("login").hidden = s.logged_in;
     $("sensor").textContent = s.sensor ? JSON.stringify(s.sensor, null, 2) : "Waiting for the purifier to publish…";
     $("sensor-at").textContent = s.sensor_at ? `(${s.sensor_at})` : "";

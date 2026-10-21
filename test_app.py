@@ -1,8 +1,8 @@
 import unittest
 from datetime import date, datetime, timezone
 
-from app import (air_not_good, filter_estimate, in_window, merge_history, parse_export, retry_delay, sun_times, validate,
-                 wanted_light)
+from app import (air_not_good, filter_estimate, in_window, merge_history, parse_export, retry_delay, send_due, sun_times,
+                 validate, wanted_light)
 
 LONDON = {"mode": "auto", "timezone": "Europe/London", "latitude": 51.5, "longitude": -0.13,
           "windows": [], "air_quality": {"enabled": False, "field": "", "good": None}}
@@ -123,3 +123,14 @@ class ValidateTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SendDueTest(unittest.TestCase):
+    def test_sends_once_then_waits_before_resending(self):
+        self.assertFalse(send_due(True, True, None, 0))      # already right
+        self.assertFalse(send_due(None, False, None, 0))     # state unknown
+        self.assertTrue(send_due(True, False, None, 0))      # new change
+        self.assertFalse(send_due(True, False, (False, 0), 60))  # unconfirmed, too soon to repeat
+        self.assertTrue(send_due(True, False, (False, 0), 600))  # repeat after RESEND_SECONDS
+        self.assertTrue(send_due(False, True, (False, 0), 60))   # wanted value changed: send now
+        self.assertTrue(send_due(True, True, (False, 0), 60))    # back to what it reports: cancel the pending off

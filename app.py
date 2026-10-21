@@ -17,6 +17,7 @@ import threading
 import time
 import urllib.request
 import zipfile
+from collections import deque
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
@@ -37,6 +38,10 @@ TICK_SECONDS = 60
 MAX_RETRY_SECONDS = 30 * 60
 STALE_SECONDS = 2 * 3600  # older sensor readings count as unknown
 EXPORT_SECONDS = 30 * 60  # the purifier uploads a reading to the cloud history every 30 minutes
+OFFLINE_SECONDS = 2 * EXPORT_SECONDS + 10 * 60  # no new reading for this long: the purifier is offline
+SILENT_SECONDS = 5 * 60  # no MQTT message at all (we get the shadow every tick): reconnect
+CONFIRM_SECONDS = 3 * 60  # the purifier echoes a ring change within seconds when it is online
+RESEND_SECONDS = 10 * 60  # repeat an unconfirmed ring change this often, not every tick
 MODES = ("auto", "on", "off", "paused")
 EXPORT_HOST = "prod-euc1-bosch-bacon-history-export.s3.eu-central-1.amazonaws.com"  # only download exports from here
 DEFAULT_CONFIG = {
@@ -283,15 +288,22 @@ class Device:
         self.reported = {}
         self.sensor = self.meta = None
         self.sensor_at = None
+        self.heard_at = self.message_at = time.time()  # arrival of the newest reading / of any MQTT message
+        self.sent = None  # (want, epoch) of the last ring change sent and not yet confirmed
         self.seen = set()
         self.fields = {}  # shadow name -> reported field names, to find a publish-interval setting
         self.history = load_history()
+        # So a restart doesn't count the export's replay of known readings as the purifier being heard from.
+        self.sensor = self.history[-1] if self.history else None
         self.export = None  # progress of the latest cloud history export (no link)
         self.next_export = 0.0  # epoch seconds; the first export covers all of keep_seconds
         self.keep_seconds = DEFAULT_CONFIG["history_days"] * 86400
 
     def ensure_connected(self):
-        if self.client and self.client.is_connected() and time.time() < self.expires - 300:
+        silent = time.time() - self.message_at
+        if self.client and silent > SILENT_SECONDS:
+            log(f"no MQTT message for {silent // 60:.0f} min; reconnecting", error=True)
+        elif self.client and self.client.is_connected() and time.time() < self.expires - 300:
             return
         self.close()
         token = access_token()
@@ -302,6 +314,7 @@ class Device:
         self.sub, self.serial, self.expires = str(claims["sub"]), serials[0], claims.get("exp", time.time() + 900)
         self.client, _ = connect(token, self.sub)
         self.client.on_message = self._on_message
+        self.message_at = time.time()
         log("connected")
 
     def request_export(self):
@@ -323,7 +336,8 @@ class Device:
         with self.lock:
             self.export.update({k: payload.get(k) for k in ("state", "errorMessage", "ttl")},
                                link_host=urlsplit(link).hostname if isinstance(link, str) else None)
-        log(f"history export {payload.get('state')}{': ' + str(payload['errorMessage']) if payload.get('errorMessage') else ''}")
+        log(f"history export {payload.get('state')}{': ' + str(payload['errorMessage']) if payload.get('errorMessage') else ''}",
+            error=bool(payload.get("errorMessage")))
         if payload.get("state") == "SUCCEEDED" and isinstance(link, str):
             parts = urlsplit(link)
             if parts.scheme == "https" and parts.hostname == EXPORT_HOST:
@@ -346,7 +360,7 @@ class Device:
         except Exception as exc:  # report, don't kill the thread silently
             with self.lock:
                 self.export["download_error"] = str(exc)
-            log(f"history export download failed: {exc}")
+            log(f"history export download failed: {exc}", error=True)
             return
         newest = max(readings, key=lambda r: r["timestamp"], default=None)
         with self.lock:
@@ -354,6 +368,7 @@ class Device:
             if newest and (not self.sensor or newest["timestamp"] > self.sensor.get("timestamp", 0)):
                 self.sensor = newest
                 self.sensor_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                self.heard_at = time.time()
             self.export.update(imported=len(readings), newest=newest and datetime.fromtimestamp(
                 newest["timestamp"], timezone.utc).isoformat(timespec="seconds"))
         log(f"history export imported {len(readings)} readings")
@@ -368,6 +383,15 @@ class Device:
         return f"users/{self.sub}/devices/{self.serial}/{suffix}"
 
     def _on_message(self, client, userdata, msg):
+        # paho stops its network thread on a callback exception; log it and keep the session alive.
+        self.message_at = time.time()
+        try:
+            self._handle(msg)
+        except Exception as exc:
+            log(f"MQTT message on {msg.topic.replace(self.sub or '', '{sub}')} failed: {type(exc).__name__}: {exc}",
+                error=True)
+
+    def _handle(self, msg):
         channel = msg.topic[len(self._topic("")):] if msg.topic.startswith(self._topic("")) else None
         if (channel or msg.topic) not in self.seen:  # first sighting per topic, to find what starts live readings
             self.seen.add(channel or msg.topic)
@@ -377,11 +401,12 @@ class Device:
                 try:
                     self._export_progress(json.loads(msg.payload))
                 except ValueError:
-                    pass
+                    log("history export progress was not JSON", error=True)
             return
         try:
             payload = json.loads(msg.payload)
         except ValueError:
+            log(f"MQTT message on {channel} was not JSON", error=True)
             return
         with self.lock:
             if channel.startswith("shadows/"):
@@ -400,6 +425,7 @@ class Device:
                 # The broker replays the last batch on every connect; only newer readings count as received now.
                 if known is None or not stamped or newest["timestamp"] > known:
                     self.sensor_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                    self.heard_at = time.time()
                 if not self.sensor or newest.get("timestamp", 0) >= self.sensor.get("timestamp", 0):
                     self.sensor = newest
                 self.add_history(stamped)
@@ -415,7 +441,7 @@ class Device:
             try:
                 save_history(merged)  # a few writes an hour at most; fine for an SD card
             except OSError as exc:
-                log(f"history not saved: {exc}")
+                log(f"history not saved: {exc}", error=True)
 
     def refresh(self):
         self.client.publish(self._topic("shadows/state/get"), "")
@@ -424,18 +450,34 @@ class Device:
             self.client.publish(self._topic(f"shadows/{shadow}/get"), "")
 
     def set_light(self, on):
-        self.client.publish(self._topic("shadows/state/update"),
-                            json.dumps({"state": {"desired": {"lightEnabled": on}}}))
+        info = self.client.publish(self._topic("shadows/state/update"),
+                                   json.dumps({"state": {"desired": {"lightEnabled": on}}}))
+        if info.rc:  # not queued (e.g. disconnected): fail the tick so it reconnects and retries
+            raise RuntimeError(f"ring change not sent (MQTT rc {info.rc})")
 
 
 device = Device()
 status = {"error": None, "last_tick": None, "wanted": None, "in_window": None, "air_not_good": None,
-          "air_value": None, "last_change": None}
+          "air_value": None, "last_change": None, "offline": False, "unconfirmed": None}
+errors = deque(maxlen=20)  # newest first, shown on the dashboard
 pending_login = {}
 
 
-def log(message):
-    print(datetime.now().isoformat(timespec="seconds"), message, flush=True)
+def log(message, error=False):
+    line = f"{datetime.now().isoformat(timespec='seconds')} {'ERROR ' * error}{message}"
+    print(line, flush=True)
+    if error:
+        errors.appendleft(line)
+
+
+def send_due(current, want, sent, now):
+    """Whether to (re)send a ring change: new, or unconfirmed for RESEND_SECONDS. The shadow keeps the
+    desired value, so an offline purifier applies it when it is back; repeating every tick only spams."""
+    if want is None or current is None:
+        return False
+    if sent is not None and sent[0] != want:
+        return True  # overwrite the pending opposite change, or the purifier applies it when back
+    return current != want and (sent is None or now - sent[1] >= RESEND_SECONDS)
 
 
 def tick():
@@ -449,7 +491,14 @@ def tick():
     time.sleep(3)  # let the shadow reply land before deciding
     with device.lock:
         reading, current = device.sensor, device.reported.get("lightEnabled")
+        heard_at = device.heard_at
         device.add_history([])  # applies a shortened retention
+    offline = time.time() - heard_at > OFFLINE_SECONDS
+    if offline != status["offline"]:
+        since = datetime.fromtimestamp(heard_at, timezone.utc).isoformat(timespec="seconds")
+        log(f"purifier offline: no new reading since {since}; ring and power show its last report" if offline
+            else "purifier back online", error=offline)
+        status["offline"] = offline
     stamp = (reading or {}).get("timestamp")
     if isinstance(stamp, (int, float)) and now.timestamp() - stamp > STALE_SECONDS:
         reading = None
@@ -458,10 +507,20 @@ def tick():
     status.update(last_tick=now.isoformat(timespec="seconds"), wanted=want, in_window=in_window(cfg, now),
                   air_not_good=air_not_good(rule, reading) if rule["field"] else None,
                   air_value=(reading or {}).get(rule["field"]) if rule["field"] else None, error=None)
-    if want is not None and current is not None and current != want:
+    if send_due(current, want, device.sent, now.timestamp()):
+        retry = device.sent is not None and device.sent[0] == want
         device.set_light(want)
-        status["last_change"] = f"{now.isoformat(timespec='seconds')} light {'on' if want else 'off'}"
+        device.sent = (want, now.timestamp())
+        if not retry:
+            status["unconfirmed"] = None
+        status["last_change"] = f"{now.isoformat(timespec='seconds')} light {'on' if want else 'off'}{' (resent)' * retry}"
         log(status["last_change"])
+    if want is None or (current == want and (device.sent is None or device.sent[0] == want)):
+        device.sent = status["unconfirmed"] = None
+    if device.sent and not status["unconfirmed"] and now.timestamp() - device.sent[1] >= CONFIRM_SECONDS:
+        status["unconfirmed"] = f"purifier hasn't confirmed light {'on' if device.sent[0] else 'off'} sent at " \
+            f"{datetime.fromtimestamp(device.sent[1], timezone.utc).isoformat(timespec='seconds')}"
+        log(status["unconfirmed"], error=True)
 
 
 def retry_delay(failures):
@@ -483,7 +542,7 @@ def scheduler():
             failures += 1
             delay = retry_delay(failures)
             message = f"{type(exc).__name__}: {str(exc)[:150]}"
-            log(f"error {message}; retry {failures} in {delay // 60} min")
+            log(f"{message}; retry {failures} in {delay // 60} min", error=True)
             status["error"] = f"{message} (retrying in {delay // 60} min)"
             device.close()
         time.sleep(delay)
@@ -545,9 +604,10 @@ class Handler(BaseHTTPRequestHandler):
                         "publish_interval": device.reported.get("dataLakeBasePublishInterval"),
                         "sensor": device.sensor, "sensor_at": device.sensor_at, "meta": device.meta,
                         "shadow_fields": device.fields, "export": device.export,
-                        "filter": filter_estimate(device.history)}
+                        "filter": filter_estimate(device.history),
+                        "heard_at": datetime.fromtimestamp(device.heard_at, timezone.utc).isoformat(timespec="seconds")}
             self._send(200, {"config": cfg, "logged_in": os.path.exists(os.environ["BOSCH_AIR_TOKEN_FILE"]),
-                             "sun": today_sun(cfg), **live, **status})
+                             "sun": today_sun(cfg), "errors": list(errors), **live, **status})
         elif self.path == "/api/history":
             with device.lock:
                 history = list(device.history)
@@ -588,6 +648,7 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, RedirectError) as exc:
             self._send(400, {"error": str(exc)})
         except Exception as exc:
+            log(f"POST {self.path} failed: {type(exc).__name__}", error=True)  # no detail: may echo login responses
             self._send(502, {"error": f"{type(exc).__name__}"})
 
 
