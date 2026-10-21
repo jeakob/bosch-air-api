@@ -403,6 +403,8 @@ class Device:
                 except ValueError:
                     log("history export progress was not JSON", error=True)
             return
+        if not msg.payload:
+            return  # our own empty shadow get requests, echoed back
         try:
             payload = json.loads(msg.payload)
         except ValueError:
